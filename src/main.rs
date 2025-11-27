@@ -8,23 +8,30 @@ const VOWELS: [char; 7] = ['a', 'e', 'ë', 'i', 'o', 'u', 'y'];
 // 'ova' => 'uaj'
 // 'eva' => 'yej'
 
-fn suffix_to_possibilities(suffix: &str) -> Vec<&str> {
+fn suffix_to_possibilities(suffix: &str) -> Option<Vec<&str>> {
     // I'm doing this so I can see what matches
     // are repeated.
-    match suffix {
+    let mat = match suffix {
         "ova" | "ove" | "oi" | "uam" | "uat" | "uan" | "uar" => vec!["oj", "uaj"],
         "va" | "ve" | "u" | "më" | "të" | "në" | "rë" => vec!["j"],
-        "ja" | "je" | "nte" | "nim" | "nit" | "nin" => vec!["j"],
+        "ja" | "je" | "nim" | "nit" | "nin" => vec!["j", ""], // Remember that empty doesn't mean
+        // no match. It means that it'll get
+        // normalized to nothing
+        "nte" => vec!["j"],
         "j" | "n" | "jmë" | "ni" | "jne" => vec!["j"],
         "ta" | "te" | "ti" | "tëm" | "tët" | "tën" | "tur" => vec!["j"],
+        "im" | "ni" | "in" => vec![""],
         "ra" | "rë" | "ri" => vec!["j"], // Leaving problems on for now, to sort them out later
-        _ => vec![], // I'll return a Option(None) instead
-    }
+        _ => return None,                // I'll return a Option(None) instead
+    };
+    Some(mat)
 }
 
 fn main() {
     println!("Hello, world!");
     verb_to_base("punojme");
+    let Some(_) = suffix_to_possibilities("morea") else {return};
+    println!("This is never reached");
     // let Some(n) = return_some_option() else { return };
 }
 
