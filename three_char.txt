@@ -1,0 +1,7 @@
+"ova"| "ove"| "uam"| "uat"| "uan"| "uar"| => "uaj"|
+"jta"| "jte"| "jti"|
+"nim"| "nit"| "nin"|
+"nte"|
+"jmë"| "jne"|
+"tëm"| "tët"| "tën"|
+"tur"|
