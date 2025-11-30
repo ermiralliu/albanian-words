@@ -8,63 +8,52 @@ use unicode_normalization::UnicodeNormalization;
 // const NFD_E_DIAERESIS_3B: [u8; 3] = [0x65, 0xCC, 0x88];
 // When converted to &str: "ë"
 
-// fn suffix_1char(ch: char) -> Option<Vec<&'static str>> {
-//     // For now, I'm keeping it simple with
-//     // static lifetimes
-//     let mat = match ch {
-//         'u' => vec!["j", "e", ""],
-//         'j' | 'n' => vec!["j"],
-//         'a' | 'e' | 'i' | 'ë' => vec![""],
-//         _ => return None,
-//     };
-//     Some(mat)
-// }
-fn suffix_1char(ch: &str) -> Option<Vec<&'static str>> {
+fn suffix_1char(ch: &str) -> Option<&[&'static str]> {
     // For now, I'm keeping it simple with
     // static lifetimes
-    let mat = match ch {
-        "u" => vec!["j", "e", ""],
-        "j" | "n" => vec!["j"],
-        "a" | "e" | "i" | "ë" => vec![""],
+    let mat: &[&str] = match ch {
+        "u" => &["j", "e", ""],
+        "j" | "n" => &["j"],
+        "a" | "e" | "i" | "ë" => &[""],
         _ => return None,
     };
     Some(mat)
 }
-fn suffix_2char(st: &str) -> Option<Vec<&'static str>> {
+fn suffix_2char(st: &str) -> /*Option<Vec<&'static str>> */ Option<&[&'static str]>{
     // only the last two elements of the string are passed
-    let mat = match st {
-        "oi" => vec!["oj", "uaj"],
-        "va" | "ve" | "më" | "të" | "në" => vec!["j", "e", ""], // + "e" per shtie? but really low
-        "rë" => vec!["j"],
-        "ja" | "je" => vec!["j", "", "e"],
-        "ni" => vec!["j"],
-        "ta" | "ti" => vec!["j", ""],
-        "te" => vec!["j", ""],
-        "im" | "in" => vec![""],
-        "ra" | "ri" => vec!["j"],
-        "ëm" | "ët" | "ën" | "ur" => vec![""], // kto me ë psh do kalohen te ato qe duan 3
+    let mat: &[&str] = match st { // this one needed explicit coercion
+        "oi" => &["oj", "uaj"],
+        "va" | "ve" | "më" | "të" | "në" => &["j", "e", ""], // + "e" per shtie? but really low
+        "rë" => &["j"],
+        "ja" | "je" => &["j", "", "e"],
+        "ni" => &["j"],
+        "ta" | "ti" => &["j", ""],
+        "te" => &["j", ""],
+        "im" | "in" => &[""],
+        "ra" | "ri" => &["j"],
+        "ëm" | "ët" | "ën" | "ur" => &[""], // kto me ë psh do kalohen te ato qe duan 3
         // karaktere
         _ => return None,
     };
     Some(mat)
 }
-fn suffix_3char(st: &str) -> Option<Vec<&'static str>> {
-    let mat = match st {
-        "ova" | "ove" | "uam" | "uat" | "uan" | "uar" => vec!["oj", "uaj"],
-        "jta" | "jte" | "jti" => vec!["j"],
-        "nim" | "nit" | "nin" => vec!["j", "", "e"],
-        "nte" => vec!["j"],
-        "jmë" | "jne" => vec!["j"],
-        "tëm" | "tët" | "tën" => vec!["j", ""],
-        "tur" => vec!["j", ""],
+fn suffix_3char(st: &str) -> Option<&[&'static str]> {
+    let mat: &[&str] = match st {
+        "ova" | "ove" | "uam" | "uat" | "uan" | "uar" => &["oj", "uaj"],
+        "jta" | "jte" | "jti" => &["j"],
+        "nim" | "nit" | "nin" => &["j", "", "e"],
+        "nte" => &["j"],
+        "jmë" | "jne" => &["j"],
+        "tëm" | "tët" | "tën" => &["j", ""],
+        "tur" => &["j", ""],
         _ => return None,
     };
     Some(mat)
 }
 
-fn suffix_4char(st: &str) -> Option<Vec<&'static str>> {
-    let mat = match st {
-        "jtëm" | "jtët" | "jtën" | "jtur" => vec!["j"],
+fn suffix_4char(st: &str) -> Option<&[&'static str]> {
+    let mat: &[&str] = match st {
+        "jtëm" | "jtët" | "jtën" | "jtur" => &["j"],
         _ => return None,
     };
     Some(mat)
@@ -144,7 +133,8 @@ fn verb_to_base(verbs: &[&str], map: &HashMap<&str, u16>) -> Vec<u16> {
     ids
 }
 
-type SuffixFunction = fn(&str) -> Option<Vec<&str>>;
+// type SuffixFunction = fn(&str) -> Option<Vec<&str>>;
+type SuffixFunction = fn(&str) -> Option<&[&str]>;
 
 fn possibilities_for_verb(
     suffix_char_len: usize,
