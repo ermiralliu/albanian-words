@@ -1,5 +1,7 @@
+pub mod alb_parser;
 use std::{collections::HashMap, vec};
 
+use alb_parser::AlbanianParser;
 use unicode_normalization::UnicodeNormalization;
 
 // const VOWELS: [char; 7] = ['a', 'e', 'ë', 'i', 'o', 'u', 'y'];
@@ -78,9 +80,14 @@ fn main() {
         // placeholder function, normally will be the algorithms and whatnot
         println!("{}", vocab_vector[el as usize]);
     }
+    let mut parser = AlbanianParser::new(&map);
+    for el in parser.verb_to_base(&verbs){
+        println!("{}", vocab_vector[el as usize]);
+    }
     // let Some(n) = return_some_option() else { return };
 }
 
+/// Returns a vector of ids for a sentence
 fn verb_to_base(verbs: &[&str], map: &HashMap<&str, u16>) -> Vec<u16> {
     // A slice of slices (kind of like an array of arrays)
     let mut ids = Vec::new(); // not providing u16 directly to try keep it more open
@@ -170,6 +177,3 @@ fn possibilities_for_verb(
     }
     None
 }
-// fn return_some_option() -> Option<i32> {
-//     Option::Some(234903)
-// }
