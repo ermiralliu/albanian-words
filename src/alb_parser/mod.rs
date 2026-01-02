@@ -79,8 +79,7 @@ impl<'a> AlbanianParser<'a> {
         self.normalization_buffer.clear();
         self.main_buffer.clear();
         self.base_form.clear();
-        // adding the characters
-        // the function below normalizes three byte ë and ç to the 2 byte version.
+
         self.normalization_buffer.extend(verb.nfc());
         // I don't like it but I was basically forced to use two different buffers.
         self.main_buffer.extend(
@@ -89,13 +88,16 @@ impl<'a> AlbanianParser<'a> {
             self.normalization_buffer.chars().flat_map(|ch| ch.to_lowercase()),
         );
         self.base_form.push_str(&self.main_buffer); // This is the variable we will test
-        const CHECKS: &[(usize, SuffixFunction)] = &[(4, suffix_4char), (3, suffix_3char), (2, suffix_2char), (1, suffix_1char)];
-        for &(len, func) in CHECKS {
-            self.possibilities_for_verb(len, func)?;
-        }
+        const CHECKS: &[(usize, SuffixFunction)] = &[
+            (4, suffix_4char),
+            (3, suffix_3char),
+            (2, suffix_2char),
+            (1, suffix_1char),
+        ];
 
-        None
-
+        CHECKS
+            .iter()
+            .find_map(|&(len, func)| self.possibilities_for_verb(len, func))
     }
 
     fn possibilities_for_verb(&mut self, suffix_char_len: usize, suffix_function: SuffixFunction) -> Option<u16> {
