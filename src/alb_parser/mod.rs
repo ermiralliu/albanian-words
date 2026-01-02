@@ -75,6 +75,35 @@ impl<'a>  AlbanianParser <'a> {
         ids
     }
 
+    pub fn single_verb_to_base(&mut self, verb: &str) -> Option<u16>{
+            self.normalization_buffer.clear();
+            self.main_buffer.clear();
+            self.base_form.clear();
+            // adding the characters
+            // the function below normalizes three byte ë and ç to the 2 byte version.
+            self.normalization_buffer.extend(verb.nfc());
+            // I don't like it but I was basically forced to use two different buffers.
+            self.main_buffer.extend(
+                // Had to do this because lowercasing would create a String otherwise.
+                // I still have to read the assembly. If the assembly is bad, I'll implement it myself
+                self.normalization_buffer.chars().flat_map(|ch| ch.to_lowercase()),
+            );
+            self.base_form.push_str(&self.main_buffer); // This is the variable we will test
+                                                                //
+            self.possibilities_for_verb(4, suffix_4char)?;
+            self.base_form.replace_range(.., &self.main_buffer);
+
+            self.possibilities_for_verb(3, suffix_3char)?;
+            self.base_form.replace_range(.., &self.main_buffer);
+
+            self.possibilities_for_verb(2, suffix_2char)?;
+            self.base_form.replace_range(.., &self.main_buffer);
+
+            self.possibilities_for_verb(1, suffix_1char)?;
+                
+            None
+    }
+
     fn possibilities_for_verb(&mut self, suffix_char_len: usize, suffix_function: SuffixFunction) -> Option<u16> {
         // usually you know how much I don't like unnecessary functions but this is repeated 4 times,
         // and this way it probably has more instruction cache advantages
