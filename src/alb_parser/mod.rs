@@ -16,15 +16,15 @@ const CATEGORY_DELIMITER: u8 = b'\n';
 
 const DEFAULT_WORD_BUFFER_CAPACITY: usize = 256;
 
-pub struct AlbanianParser <'a> {
+pub struct AlbanianParser<'a> {
     vocab: &'a HashMap<&'a str, u16>,
     normalization_buffer: String, // after normalizing ë andç
     main_buffer: String,          // after lowercasing the normalization buffer
     base_form: String,            // after lowercasing the normalization buffer
 }
 
-impl<'a>  AlbanianParser <'a> {
-    pub fn new(vocab: &'a HashMap<&'a str, u16>) -> AlbanianParser<'a>{
+impl<'a> AlbanianParser<'a> {
+    pub fn new(vocab: &'a HashMap<&'a str, u16>) -> AlbanianParser<'a> {
         AlbanianParser {
             vocab,
             normalization_buffer: String::with_capacity(DEFAULT_WORD_BUFFER_CAPACITY),
@@ -33,75 +33,69 @@ impl<'a>  AlbanianParser <'a> {
         }
     }
     /// Returns a vector of ids for a sentence
-    pub fn verb_to_base(&mut self, verbs: &[&str]) -> Vec<u16> {
-        let mut ids = Vec::new(); // not providing u16 directly to try keep it more open
-        for &verb in verbs {
-            // making sure the buffers are empty
-            self.normalization_buffer.clear();
-            self.main_buffer.clear();
-            self.base_form.clear();
-            // adding the characters
-            // the function below normalizes three byte ë and ç to the 2 byte version.
-            self.normalization_buffer.extend(verb.nfc());
-            // I don't like it but I was basically forced to use two different buffers.
-            self.main_buffer.extend(
-                // Had to do this because lowercasing would create a String otherwise.
-                // I still have to read the assembly. If the assembly is bad, I'll implement it myself
-                self.normalization_buffer.chars().flat_map(|ch| ch.to_lowercase()),
-            );
-            self.base_form.push_str(&self.main_buffer); // This is the variable we will test
-            if let Some(id) = self.possibilities_for_verb(4, suffix_4char) {
-                ids.push(id);
-                continue;
-            }
-            self.base_form.replace_range(.., &self.main_buffer);
-            // self.base_form.clear();
-            // self.base_form.push_str(&self.main_buffer); // This part will also need to be improved.
-            if let Some(id) = self.possibilities_for_verb(3, suffix_3char) {
-                ids.push(id);
-                continue;
-            }
-            self.base_form.replace_range(.., &self.main_buffer);
-            if let Some(id) = self.possibilities_for_verb(2, suffix_2char) {
-                ids.push(id);
-                continue;
-            }
-            self.base_form.replace_range(.., &self.main_buffer);
+    // pub fn verb_to_base(&mut self, verbs: &[&str]) -> Vec<u16> {
+    //     let mut ids = Vec::new(); // not providing u16 directly to try keep it more open
+    //     for &verb in verbs {
+    //         // making sure the buffers are empty
+    //         self.normalization_buffer.clear();
+    //         self.main_buffer.clear();
+    //         self.base_form.clear();
+    //         // adding the characters
+    //         // the function below normalizes three byte ë and ç to the 2 byte version.
+    //         self.normalization_buffer.extend(verb.nfc());
+    //         // I don't like it but I was basically forced to use two different buffers.
+    //         self.main_buffer.extend(
+    //             // Had to do this because lowercasing would create a String otherwise.
+    //             // I still have to read the assembly. If the assembly is bad, I'll implement it myself
+    //             self.normalization_buffer.chars().flat_map(|ch| ch.to_lowercase()),
+    //         );
+    //         self.base_form.push_str(&self.main_buffer); // This is the variable we will test
+    //         if let Some(id) = self.possibilities_for_verb(4, suffix_4char) {
+    //             ids.push(id);
+    //             continue;
+    //         }
+    //         self.base_form.replace_range(.., &self.main_buffer);
+    //         // self.base_form.clear();
+    //         // self.base_form.push_str(&self.main_buffer); // This part will also need to be improved.
+    //         if let Some(id) = self.possibilities_for_verb(3, suffix_3char) {
+    //             ids.push(id);
+    //             continue;
+    //         }
+    //         self.base_form.replace_range(.., &self.main_buffer);
+    //         if let Some(id) = self.possibilities_for_verb(2, suffix_2char) {
+    //             ids.push(id);
+    //             continue;
+    //         }
+    //         self.base_form.replace_range(.., &self.main_buffer);
+    //
+    //         if let Some(id) = self.possibilities_for_verb(1, suffix_1char) {
+    //             ids.push(id);
+    //         }
+    //     }
+    //     ids
+    // }
 
-            if let Some(id) = self.possibilities_for_verb(1, suffix_1char) {
-                ids.push(id);
-            }
+    pub fn single_verb_to_base(&mut self, verb: &str) -> Option<u16> {
+        self.normalization_buffer.clear();
+        self.main_buffer.clear();
+        self.base_form.clear();
+        // adding the characters
+        // the function below normalizes three byte ë and ç to the 2 byte version.
+        self.normalization_buffer.extend(verb.nfc());
+        // I don't like it but I was basically forced to use two different buffers.
+        self.main_buffer.extend(
+            // Had to do this because lowercasing would create a String otherwise.
+            // I still have to read the assembly. If the assembly is bad, I'll implement it myself
+            self.normalization_buffer.chars().flat_map(|ch| ch.to_lowercase()),
+        );
+        self.base_form.push_str(&self.main_buffer); // This is the variable we will test
+        const CHECKS: &[(usize, SuffixFunction)] = &[(4, suffix_4char), (3, suffix_3char), (2, suffix_2char), (1, suffix_1char)];
+        for &(len, func) in CHECKS {
+            self.possibilities_for_verb(len, func)?;
         }
-        ids
-    }
 
-    pub fn single_verb_to_base(&mut self, verb: &str) -> Option<u16>{
-            self.normalization_buffer.clear();
-            self.main_buffer.clear();
-            self.base_form.clear();
-            // adding the characters
-            // the function below normalizes three byte ë and ç to the 2 byte version.
-            self.normalization_buffer.extend(verb.nfc());
-            // I don't like it but I was basically forced to use two different buffers.
-            self.main_buffer.extend(
-                // Had to do this because lowercasing would create a String otherwise.
-                // I still have to read the assembly. If the assembly is bad, I'll implement it myself
-                self.normalization_buffer.chars().flat_map(|ch| ch.to_lowercase()),
-            );
-            self.base_form.push_str(&self.main_buffer); // This is the variable we will test
-                                                                //
-            self.possibilities_for_verb(4, suffix_4char)?;
-            self.base_form.replace_range(.., &self.main_buffer);
+        None
 
-            self.possibilities_for_verb(3, suffix_3char)?;
-            self.base_form.replace_range(.., &self.main_buffer);
-
-            self.possibilities_for_verb(2, suffix_2char)?;
-            self.base_form.replace_range(.., &self.main_buffer);
-
-            self.possibilities_for_verb(1, suffix_1char)?;
-                
-            None
     }
 
     fn possibilities_for_verb(&mut self, suffix_char_len: usize, suffix_function: SuffixFunction) -> Option<u16> {
@@ -125,10 +119,13 @@ impl<'a>  AlbanianParser <'a> {
                             let base_form = &self.base_form;
                             dbg!(base_form);
                         }
+                        self.base_form.replace_range(.., &self.main_buffer);
                         return Some(*matching_word); // we return on the first match. This is a bit
                         // this is a bit tightly coupled ngl
                     };
                 }
+                self.base_form.replace_range(.., &self.main_buffer);
+                // I wish there was a way that doesn't require setting this twice.
             }
         }
         None
