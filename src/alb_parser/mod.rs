@@ -1,7 +1,8 @@
 use std::collections::HashMap;
-use unicode_normalization::UnicodeNormalization;
+// use unicode_normalization::UnicodeNormalization;
 
-type SuffixFunction = fn(&str) -> Option<&[&str]>;
+// type SuffixFunction = fn(&str) -> Option<&[&str]>;
+type SuffixFunction = fn(&[u8]) -> Option<&[&[u8]]>;
 
 // using &[u8] lets you have fun without worrying about sizes. Nice Rust stuff.
 // em dash might also appear, but I think that shit will likely have spaces around, so who cares.
@@ -9,26 +10,29 @@ const WORD_DELIMITERS: &[u8] = &[
     b'.', b',', b'/', b'\\', b' ', b'\n', b'\t', b'\"', b'\'', b':', b';', b'!', b'?', b'(', b')', b'[', b']', b'\r',
 ];
 
-const CONTENT_DELIMITER: &str = "/endarticle";
+// const CONTENT_DELIMITER: &str = "/endarticle";
 
 const CATEGORY_DELIMITER: u8 = b'\n';
 
-const DEFAULT_WORD_BUFFER_CAPACITY: usize = 256;
+const DEFAULT_WORD_BUFFER_CAPACITY: usize = 1024; // Increased this size only because of some
+                                                  // retarded articles
 
 pub struct AlbanianParser<'a> {
-    vocab: &'a HashMap<&'a str, u16>,
-    normalization_buffer: String, // after normalizing ë andç
+    vocab: &'a HashMap<&'a [u8], u16>,
+    // normalization_buffer: String, // after normalizing ë andç
     // main_buffer: String,          // after lowercasing the normalization buffer
-    base_form: String, // after lowercasing the normalization buffer
+    base_form: [u8; DEFAULT_WORD_BUFFER_CAPACITY], // after lowercasing the normalization buffer
+    base_form_len: usize,
 }
 
 impl<'a> AlbanianParser<'a> {
-    pub fn new(vocab: &'a HashMap<&'a str, u16>) -> AlbanianParser<'a> {
+    pub fn new(vocab: &'a HashMap<&'a [u8], u16>) -> AlbanianParser<'a> {
         AlbanianParser {
             vocab,
-            normalization_buffer: String::with_capacity(DEFAULT_WORD_BUFFER_CAPACITY),
+            // normalization_buffer: String::with_capacity(DEFAULT_WORD_BUFFER_CAPACITY),
             // main_buffer: String::with_capacity(DEFAULT_WORD_BUFFER_CAPACITY),
-            base_form: String::with_capacity(DEFAULT_WORD_BUFFER_CAPACITY),
+            base_form: [0u8; DEFAULT_WORD_BUFFER_CAPACITY],
+            base_form_len: 0,
         }
     }
     /// Returns a vector of ids for a sentence
@@ -74,28 +78,16 @@ impl<'a> AlbanianParser<'a> {
     //     ids
     // }
 
-    pub fn single_verb_to_base(&mut self, verb: &str) -> Option<u16> {
-        // self.normalization_buffer.clear();
-        // self.main_buffer.clear();
-        // self.base_form.clear();
-
-        // self.normalization_buffer.extend(verb.nfc());
-        // // I don't like it but I was basically forced to use two different buffers.
-        // self.main_buffer.extend(
-        //     // Had to do this because lowercasing would create a String otherwise.
-        //     // I still have to read the assembly. If the assembly is bad, I'll implement it myself
-        //     self.normalization_buffer.chars().flat_map(|ch| ch.to_lowercase()),
-        // );
-        // self.main_buffer.push_str(verb); // this probably doesn't need to be pushed
-        // and should be used directly
-        // Yeah, I'm passing verb directly into the function now.
-        self.base_form.clear();
-        self.base_form.push_str(verb); // This is the variable we will test
+    pub fn single_verb_to_base(&mut self, verb: &[u8]) -> Option<u16> {
+        // we can use copy non-overlapping if the copy below is not enough
+                self.base_form[..verb.len()].copy_from_slice(verb);
+        self.base_form_len = verb.len();
         const CHECKS: &[(usize, SuffixFunction)] = &[
-            (4, suffix_4char),
-            (3, suffix_3char),
-            (2, suffix_2char),
-            (1, suffix_1char),
+            (5, suffix_5byte),
+            (4, suffix_4byte),
+            (3, suffix_3byte),
+            (2, suffix_2byte),
+            (1, suffix_1byte),
         ];
 
         CHECKS
@@ -105,42 +97,41 @@ impl<'a> AlbanianParser<'a> {
 
     fn possibilities_for_verb(
         &mut self,
-        verb: &str,
-        suffix_char_len: usize,
+        verb: &[u8],
+        suffix_byte_len: usize,
         suffix_function: SuffixFunction,
     ) -> Option<u16> {
         // usually you know how much I don't like unnecessary functions but this is repeated 4 times,
         // and this way it probably has more instruction cache advantages
-        if verb.len() <= suffix_char_len {
-            return None;
-        }; // Somehow I didn't have a single guard
-        // here?
         let main_buffer = verb;
-        if let Some((suffix_offset, _ch)) = main_buffer.char_indices().nth_back(suffix_char_len - 1) {
+        if main_buffer.len() >= suffix_byte_len {
+            let suffix_offset = main_buffer.len() - suffix_byte_len;
             let suffix = &main_buffer[suffix_offset..];
-            #[cfg(debug_assertions)]
-            {
-                // println!("Verb: {}, Suffix: {}", main_buffer, suffix);
-            }
+
             if let Some(possibilities) = suffix_function(suffix) {
                 for el in possibilities {
-                    self.base_form.replace_range(suffix_offset.., el);
-                    // println!("{}",self.base_form);
-                    if let Some(matching_word) = self.vocab.get(&self.base_form[..]) {
-                        // simple way of verifying a value and removing it in
-                        // production code.
-                        #[cfg(debug_assertions)]
-                        {
-                            // let base_form = &self.base_form;
-                            // dbg!(base_form);
-                        }
-                        self.base_form.replace_range(.., &main_buffer);
-                        return Some(*matching_word); // we return on the first match. This is a bit
-                        // this is a bit tightly coupled ngl
-                    };
+                    let el_bytes = el;
+
+                    // 1. "Replace" by writing the new suffix bytes over the old ones
+                    unsafe {
+                        std::ptr::copy_nonoverlapping(
+                            el_bytes.as_ptr(),
+                            self.base_form.as_mut_ptr().add(suffix_offset),
+                            el_bytes.len(),
+                        );
+                    }
+
+                    // 2. Update the length to account for the new suffix length
+                    let current_total_len = suffix_offset + el_bytes.len();
+
+                    // 3. Lookup in vocab using a slice of the array
+                    if let Some(matching_word) = self.vocab.get(&self.base_form[..current_total_len]) {
+                        return Some(*matching_word);
+                    }
+
+                    // Note: We don't need to "reset" the buffer inside the loop because
+                    // the next 'el' will simply overwrite the same suffix_offset.
                 }
-                self.base_form.replace_range(.., &main_buffer);
-                // I wish there was a way that doesn't require setting this twice.
             }
         }
         None
@@ -226,13 +217,13 @@ const A: u64 = byte_arr_to_nr(b"a");
 const E: u64 = byte_arr_to_nr(b"e");
 const I: u64 = byte_arr_to_nr(b"i");
 
-fn suffix_1byte(ch: &[u8]) -> Option<&[&'static str]> {
+fn suffix_1byte(ch: &[u8]) -> Option<&[&'static [u8]]> {
     // For now, I'm keeping it simple with
     // static lifetimes
-    let mat: &[&str] = match byte_arr_to_nr(ch) {
-        U => &["j", "e", ""],
-        J | N => &["j"],
-        A | E | I | "ë" => &[""],
+    let mat: &[&[u8]] = match byte_arr_to_nr(ch) {
+        U => &[b"j", b"e", b""],
+        J | N => &[b"j"],
+        A | E | I => &[b""],
         _ => return None,
     };
     Some(mat)
@@ -255,20 +246,20 @@ const RA: u64 = byte_arr_to_nr(b"ra");
 const RI: u64 = byte_arr_to_nr(b"ri");
 const UR: u64 = byte_arr_to_nr(b"ur");
 
-fn suffix_2byte(st: &[u8]) -> Option<&[&'static str]> {
+fn suffix_2byte(st: &[u8]) -> Option<&[&'static [u8]]> {
     // only the last two elements of the string are passed
-    let mat: &[&str] = match byte_arr_to_nr(st) {
+    let mat: &[&[u8]] = match byte_arr_to_nr(st) {
         // this one needed explicit coercion
-        E_DIAERESIS => &[""],
-        OI => &["oj", "uaj"],
-        VA | VE => &["j", "e", ""], // + "e" per shtie? but really low
-        JA | JE => &["j", "", "e"],
-        NI => &["j"],
-        TA | TI => &["j", ""],
-        TE => &["j", ""],
-        IM | IN => &[""],
-        RA | RI => &["j"],
-        UR => &[""], // kto me ë psh do kalohen te ato qe duan 3
+        E_DIAERESIS => &[b""],
+        OI => &[b"oj", b"uaj"],
+        VA | VE => &[b"j", b"e", b""], // + "e" per shtie? but really low
+        JA | JE => &[b"j", b"", b"e"],
+        NI => &[b"j"],
+        TA | TI => &[b"j", b""],
+        TE => &[b"j", b""],
+        IM | IN => &[b""],
+        RA | RI => &[b"j"],
+        UR => &[b""], // kto me ë psh do kalohen te ato qe duan 3
         // karaktere
         _ => return None,
     };
@@ -298,16 +289,16 @@ const NTE: u64 = byte_arr_to_nr(b"nte");
 const TUR: u64 = byte_arr_to_nr(b"tur");
 const UAR: u64 = byte_arr_to_nr(b"uar");
 
-fn suffix_3byte(st: &[u8]) -> Option<&[&'static str]> {
-    let mat: &[&str] = match byte_arr_to_nr(st) {
-        MË | TË | NË => &["j", "e", ""], // + "e" per shtie? but really low
-        RË => &["j"],
-        ËM | ËT | ËN => &[""], // kto me ë psh do kalohen te ato qe duan 3
-        OVA | OVE | UAM | UAT | UAN | UAR => &["oj", "uaj"],
-        JTA | JTE | JTI => &["j"],
-        NIM | NIT | NIN => &["j", "", "e"],
-        NTE => &["j"],
-        TUR => &["j", ""],
+fn suffix_3byte(st: &[u8]) -> Option<&[&'static [u8]]> {
+    let mat: &[&[u8]] = match byte_arr_to_nr(st) {
+        MË | TË | NË => &[b"j", b"e", b""], // + "e" per shtie? but really low
+        RË => &[b"j"],
+        ËM | ËT | ËN => &[b""], // kto me ë psh do kalohen te ato qe duan 3
+        OVA | OVE | UAM | UAT | UAN | UAR => &[b"oj", b"uaj"],
+        JTA | JTE | JTI => &[b"j"],
+        NIM | NIT | NIN => &[b"j", b"", b"e"],
+        NTE => &[b"j"],
+        TUR => &[b"j", b""],
         _ => return None,
     };
     Some(mat)
@@ -319,10 +310,10 @@ const TËM: u64 = byte_arr_to_nr("tëm".as_bytes());
 const TËT: u64 = byte_arr_to_nr("tët".as_bytes());
 const TËN: u64 = byte_arr_to_nr("tën".as_bytes());
 
-fn suffix_4byte(st: &[u8]) -> Option<&[&'static str]> {
-    let mat: &[&str] = match byte_arr_to_nr(st) {
-        JMË | JNË => &["j"],
-        TËM | TËT | TËN => &["j", ""],
+fn suffix_4byte(st: &[u8]) -> Option<&[&'static [u8]]> {
+    let mat: &[&[u8]] = match byte_arr_to_nr(st) {
+        JMË | JNË => &[b"j"],
+        TËM | TËT | TËN => &[b"j", b""],
         _ => return None,
     };
     Some(mat)
@@ -333,9 +324,9 @@ const JTËT: u64 = byte_arr_to_nr("jtët".as_bytes());
 const JTËN: u64 = byte_arr_to_nr("jtën".as_bytes());
 const JTUR: u64 = byte_arr_to_nr("jtur".as_bytes());
 
-fn suffix_5byte(st: &[u8]) -> Option<&[&'static str]>  {
-    let mat: &[&str] = match byte_arr_to_nr(st) {
-        JTËM | JTËT | JTËN | JTUR => &["j"],
+fn suffix_5byte(st: &[u8]) -> Option<&[&'static [u8]]> {
+    let mat: &[&[u8]] = match byte_arr_to_nr(st) {
+        JTËM | JTËT | JTËN | JTUR => &[b"j"],
         _ => return None,
     };
     Some(mat)
