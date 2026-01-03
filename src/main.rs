@@ -2,7 +2,7 @@ pub mod alb_parser;
 pub mod file_readers;
 use regex::Regex;
 use std::{
-    collections::{HashMap, HashSet}, time::Instant, vec
+    collections::{HashMap, HashSet}, fs::read, time::Instant, vec
 };
 use unicode_normalization::UnicodeNormalization;
 
@@ -268,9 +268,11 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         // line is actually an entire article. We're not divinding by sentences.
         // Idk why sometimes that is not obvious.
         count += 1;
-        sentence_lowercasing_buffer.extend(line.nfc());
+        // sentence_lowercasing_buffer.extend(line.nfc());
+        sentence_lowercasing_buffer.replace_range(.., line);
+
         // sentence_lowercasing_buffer.extend(sentence_normalization_buffer.chars().flat_map(|ch| ch.to_lowercase()));
-        faster_lowercase(&mut sentence_lowercasing_buffer);
+        albanian_clean_inplace(&mut sentence_lowercasing_buffer);
 
         // normalized
         // separate each word
@@ -282,7 +284,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             }
             #[cfg(debug_assertions)]
             {
-                // println!("Word: {}", mat_str);
+                println!("Word: {}", mat_str);
             }
             if let Some(nr) = parser.single_verb_to_base(mat_str) {
                 sentence_tokens.push(nr);
@@ -298,44 +300,111 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         }
 
         // sentence_normalization_buffer.clear();
-        sentence_lowercasing_buffer.clear();
-        if count >= 1000 {
+        // sentence_lowercasing_buffer.clear();
+        if count >= 10 {
             break;
         }
     }
     let end = Instant::now();
-    println!("{:?}", token_container);
+    println!("{:?}", token_container[token_container.len()-1]);
     println!("Time passed: {:?}", (end-start));
     Ok(())
     // let Some(n) = return_some_option() else { return };
 }
 
-pub fn faster_lowercase(s: &mut String) { // albanian-specific
+
+pub fn albanian_clean_inplace(s: &mut String) {
+    // We work with bytes for maximum speed
     let bytes = unsafe { s.as_mut_vec() };
-    let mut i = 0;
-    while i < bytes.len() {
-        match bytes[i] {
-            // Standard ASCII uppercase A-Z
+    let mut read_idx = 0;
+    let mut write_idx = 0;
+    let len = bytes.len();
+
+    while read_idx < len {
+        match bytes[read_idx] {
+            // 1. Handle ASCII Uppercase -> Lowercase
+            // 3. Handle Decomposed 'e' + 'diaeresis' (NFD -> NFC)
+            // 'e' is 0x65, 'diaeresis' is 0xCC 0x88
+            0x65 | 0x45 if read_idx + 2 < bytes.len() 
+                && bytes[read_idx+1] == 0xCC && bytes[read_idx+2] == 0x88 => {
+                bytes[write_idx] = 0xC3;
+                bytes[write_idx + 1] = 0xAB; // Store as 'ë'
+                read_idx += 3;
+                write_idx += 2;
+            }
             b'A'..=b'Z' => {
-                bytes[i] += 32;
-                i += 1;
+                bytes[write_idx] = bytes[read_idx] + 32;
+                read_idx += 1;
+                write_idx += 1;
             }
-            // UTF-8 for Ë is [C3, 8B], for ë is [C3, AB]
-            0xC3 if i + 1 < bytes.len() && bytes[i + 1] == 0x8B => {
-                bytes[i + 1] = 0xAB; 
-                i += 2;
+            // 2. Handle Potential Ë / ë or Ç / ç (UTF-8 lead byte 0xC3)
+            0xC3 => {
+                if read_idx + 1 < bytes.len() {
+                    match bytes[read_idx + 1] {
+                        0x8B | 0xAB => bytes[write_idx + 1] = 0xAB, // Ë or ë -> ë
+                        0x87 | 0xA7 => bytes[write_idx + 1] = 0xA7, // Ç or ç -> ç
+                        _ => { /* keep as is */ }
+                    }
+                    bytes[write_idx] = 0xC3;
+                    read_idx += 2;
+                    write_idx += 2;
+                }
             }
-            // UTF-8 for Ç is [C3, 87], for ç is [C3, A7]
-            0xC3 if i + 1 < bytes.len() && bytes[i + 1] == 0x87 => {
-                bytes[i + 1] = 0xA7;
-                i += 2;
-            }
-            // Skip everything else (already lowercase or other symbols)
-            b => {
-                // Determine how many bytes to skip based on UTF-8 lead byte
-                i += if b < 0x80 { 1 } else if b < 0xE0 { 2 } else if b < 0xF0 { 3 } else { 4 };
+            // 4. Everything else: just copy (and shift if we've shrunk the string)
+            _ => {
+                if read_idx != write_idx {
+                    bytes[write_idx] = bytes[read_idx];
+                }
+                read_idx += 1;
+                write_idx += 1;
             }
         }
     }
+    
+    bytes[write_idx..len].fill(b' '); // cleaner than the for loop I was using earlier
+
+    // unsafe { s.set_len(write_idx); } // Update string length if we shrunk it
+    // s.truncate(write_idx);
 }
 
+// pub fn albanian_clean_and_bubble(s: &mut String) {
+//     let bytes = unsafe { s.as_mut_vec() };
+//     let mut i = 0;
+
+//     while i < bytes.len() {
+//         match bytes[i] {
+//             // 1. Lowercase A-Z
+//             b'A'..=b'Z' => {
+//                 bytes[i] += 32;
+//                 i += 1;
+//             }
+//             // 2. Handle Composed Ë/ë or Ç/ç (2 bytes) - No shift needed
+//             0xC3 if i + 1 < bytes.len() => {
+//                 match bytes[i + 1] {
+//                     0x8B => bytes[i + 1] = 0xAB, // Ë -> ë
+//                     0x87 => bytes[i + 1] = 0xA7, // Ç -> ç
+//                     _ => {}
+//                 }
+//                 i += 2;
+//             }
+//             // 3. Handle Decomposed E + diaeresis (3 bytes) -> Needs 1-byte bubble
+//             0x65 | 0x45 if i + 2 < bytes.len() 
+//                 && bytes[i+1] == 0xCC && bytes[i+2] == 0x88 => {
+                
+//                 // Convert current position to 2-byte 'ë'
+//                 bytes[i] = 0xC3;
+//                 bytes[i+1] = 0xAB;
+
+//                 // Move the "hole" to the end of the word
+//                 let mut j = i + 2;
+//                 while j + 1 < bytes.len() && bytes[j+1].is_ascii_alphanumeric() {
+//                     bytes[j] = bytes[j+1]; // Shift the word left
+//                     j += 1;
+//                 }
+//                 bytes[j] = b' '; // Place the space at the word boundary
+//                 i += 2; // Move 'i' to the next byte after our new 'ë'
+//             }
+//             _ => i += 1,
+//         }
+//     }
+// }
