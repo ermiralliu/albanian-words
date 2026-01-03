@@ -259,8 +259,8 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         b'\x1E',
     )?;
     let mut token_container = Vec::new();
-    let mut sentence_normalization_buffer = String::with_capacity(256 * 1024);
-    let mut sentence_lowercasing_buffer = sentence_normalization_buffer.clone();
+    // let mut sentence_normalization_buffer = String::with_capacity(256 * 1024);
+    let mut sentence_lowercasing_buffer = String::with_capacity(256 * 1024);
     let mut count = 0;
     let set: HashSet<&str> = STOP_WORDS.iter().copied().collect();
     let regex: Regex = Regex::new(r"([a-zëç-]+)")?; // Only lowercase since we alr
@@ -268,8 +268,9 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         // line is actually an entire article. We're not divinding by sentences.
         // Idk why sometimes that is not obvious.
         count += 1;
-        sentence_normalization_buffer.extend(line.nfc());
-        sentence_lowercasing_buffer.extend(sentence_normalization_buffer.chars().flat_map(|ch| ch.to_lowercase()));
+        sentence_lowercasing_buffer.extend(line.nfc());
+        // sentence_lowercasing_buffer.extend(sentence_normalization_buffer.chars().flat_map(|ch| ch.to_lowercase()));
+        faster_lowercase(&mut sentence_lowercasing_buffer);
 
         // normalized
         // separate each word
@@ -296,7 +297,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             token_container.push(sentence_tokens);
         }
 
-        sentence_normalization_buffer.clear();
+        // sentence_normalization_buffer.clear();
         sentence_lowercasing_buffer.clear();
         if count >= 1000 {
             break;
@@ -308,3 +309,33 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     Ok(())
     // let Some(n) = return_some_option() else { return };
 }
+
+pub fn faster_lowercase(s: &mut String) { // albanian-specific
+    let bytes = unsafe { s.as_mut_vec() };
+    let mut i = 0;
+    while i < bytes.len() {
+        match bytes[i] {
+            // Standard ASCII uppercase A-Z
+            b'A'..=b'Z' => {
+                bytes[i] += 32;
+                i += 1;
+            }
+            // UTF-8 for Ë is [C3, 8B], for ë is [C3, AB]
+            0xC3 if i + 1 < bytes.len() && bytes[i + 1] == 0x8B => {
+                bytes[i + 1] = 0xAB; 
+                i += 2;
+            }
+            // UTF-8 for Ç is [C3, 87], for ç is [C3, A7]
+            0xC3 if i + 1 < bytes.len() && bytes[i + 1] == 0x87 => {
+                bytes[i + 1] = 0xA7;
+                i += 2;
+            }
+            // Skip everything else (already lowercase or other symbols)
+            b => {
+                // Determine how many bytes to skip based on UTF-8 lead byte
+                i += if b < 0x80 { 1 } else if b < 0xE0 { 2 } else if b < 0xF0 { 3 } else { 4 };
+            }
+        }
+    }
+}
+
