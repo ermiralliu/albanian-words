@@ -6,7 +6,7 @@ type SuffixFunction = fn(&str) -> Option<&[&str]>;
 // using &[u8] lets you have fun without worrying about sizes. Nice Rust stuff.
 // em dash might also appear, but I think that shit will likely have spaces around, so who cares.
 const WORD_DELIMITERS: &[u8] = &[
-    b'.', b',', b'/', b'\\', b' ', b'\n', b'\t', b'\"', b'\'', b':', b';', b'!', b'?', b'(', b')', b'[', b']', b'-',
+    b'.', b',', b'/', b'\\', b' ', b'\n', b'\t', b'\"', b'\'', b':', b';', b'!', b'?', b'(', b')', b'[', b']', 
     b'\r',
 ];
 
@@ -107,6 +107,8 @@ impl<'a> AlbanianParser<'a> {
     fn possibilities_for_verb(&mut self, verb: &str, suffix_char_len: usize, suffix_function: SuffixFunction) -> Option<u16> {
         // usually you know how much I don't like unnecessary functions but this is repeated 4 times,
         // and this way it probably has more instruction cache advantages
+        if verb.len() <= suffix_char_len { return None; }; // Somehow I didn't have a single guard
+                                                           // here?
         let main_buffer = verb;
         if let Some((suffix_offset, _ch)) = main_buffer.char_indices().nth_back(suffix_char_len - 1) {
             let suffix = &main_buffer[suffix_offset..];

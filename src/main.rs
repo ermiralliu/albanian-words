@@ -2,7 +2,10 @@ pub mod alb_parser;
 pub mod file_readers;
 use regex::Regex;
 use std::{
-    collections::{HashMap, HashSet}, fs::read, time::Instant, vec
+    collections::{HashMap, HashSet},
+    fs::read,
+    time::Instant,
+    vec,
 };
 use unicode_normalization::UnicodeNormalization;
 
@@ -137,7 +140,7 @@ const STOP_WORDS: &[&str] = &[
     "ndaj",
     "mes",
     "ajo",
-    "çilën",
+    "cilën",
     "por",
     "ndërmjet",
     "prapa",
@@ -148,7 +151,7 @@ const STOP_WORDS: &[&str] = &[
     "kësaj",
     "tille",
     "bëhem",
-    "çilat",
+    "cilat",
     "kjo",
     "menjëherë",
     "ça",
@@ -159,7 +162,7 @@ const STOP_WORDS: &[&str] = &[
     "ato",
     "pasur",
     "qenë",
-    "çilin",
+    "cilin",
     "tepër",
     "njëra",
     "tej",
@@ -169,7 +172,7 @@ const STOP_WORDS: &[&str] = &[
     "ti",
     "bënë",
     "midis",
-    "çili",
+    "cili",
     "ende",
     "këto",
     "kemi",
@@ -182,7 +185,7 @@ const STOP_WORDS: &[&str] = &[
     "sipër",
     "sikur",
     "këtej",
-    "çilës",
+    "cilës",
     "ky",
     "papritur",
     "ua",
@@ -234,10 +237,23 @@ const STOP_WORDS: &[&str] = &[
     "kemi",
     "ty",
     "t",
-    "nbsp",
+    "nbsp", // This needs more work though
     "tha",
     "re",
     "the",
+    "€",
+];
+
+// const WORD_DELIMITERS: &[u8] = &[
+//     b'.', b',', b'/', b'\\', b' ', b'\n', b'\t', b'\"', b'\'', b':', b';', b'!', b'?', b'(', b')', b'[', b']',
+//     b'\r',
+// ];
+
+const WORD_DELIMITERS: &[char] = &[
+    '.', ',', '/', '\\', ' ', '\n', '\t', '\"', '\'', ':', ';', '!', '?', '(', ')', '[', ']', '\r', '\x1E', '“', '”',
+    '–', // fatkeqesisht, data set-i perdor keto quot-et e cuditshme, which
+        // kinda ruins stuff
+        // so using this non regex method is not that secure maybe? 
 ];
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
@@ -263,7 +279,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let mut sentence_lowercasing_buffer = String::with_capacity(256 * 1024);
     let mut count = 0;
     let set: HashSet<&str> = STOP_WORDS.iter().copied().collect();
-    let regex: Regex = Regex::new(r"([a-zëç-]+)")?; // Only lowercase since we alr
+    // let regex: Regex = Regex::new(r"([a-zëç-]+)")?; // Only lowercase since we alr
     while let Some(line) = sr.read() {
         // line is actually an entire article. We're not divinding by sentences.
         // Idk why sometimes that is not obvious.
@@ -277,20 +293,38 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         // normalized
         // separate each word
         let mut sentence_tokens = Vec::new();
-        for mat in regex.find_iter(&sentence_lowercasing_buffer) {
-            let mat_str = mat.as_str();
-            if set.contains(mat_str) {
-                continue;
-            }
+        let clean_words = sentence_lowercasing_buffer
+            .split(WORD_DELIMITERS)
+            .map(|s| s.trim_matches('-')) // kishte plot fjale qe
+            // '-' qe ngelnin vetem
+            .filter(|s| s.len() > 1 && !set.contains(s));
+        for mat_str in clean_words {
             #[cfg(debug_assertions)]
             {
-                println!("Word: {}", mat_str);
+                println!("Word: {}, len: {}", mat_str, mat_str.len());
+            }
+            if mat_str.parse::<f64>().is_ok() {
+                // It's a number (integer or float)
+                continue;
             }
             if let Some(nr) = parser.single_verb_to_base(mat_str) {
                 sentence_tokens.push(nr);
             }
-            // else {sentence_tokens.push(0)}
         }
+        // for mat in regex.find_iter(&sentence_lowercasing_buffer) {
+        //     let mat_str = mat.as_str();
+        //     if set.contains(mat_str) {
+        //         continue;
+        //     }
+        //     #[cfg(debug_assertions)]
+        //     {
+        //         println!("Word: {}", mat_str);
+        //     }
+        //     if let Some(nr) = parser.single_verb_to_base(mat_str) {
+        //         sentence_tokens.push(nr);
+        //     }
+        //     // else {sentence_tokens.push(0)}
+        // }
         #[cfg(debug_assertions)]
         {
             // println!("Line: {}\nTokenized:{:?}", line, sentence_tokens);
@@ -306,12 +340,11 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         }
     }
     let end = Instant::now();
-    println!("{:?}", token_container[token_container.len()-1]);
-    println!("Time passed: {:?}", (end-start));
+    println!("{:?}", token_container[token_container.len() - 1]);
+    println!("Time passed: {:?}", (end - start));
     Ok(())
     // let Some(n) = return_some_option() else { return };
 }
-
 
 pub fn albanian_clean_inplace(s: &mut String) {
     // We work with bytes for maximum speed
@@ -325,8 +358,7 @@ pub fn albanian_clean_inplace(s: &mut String) {
             // 1. Handle ASCII Uppercase -> Lowercase
             // 3. Handle Decomposed 'e' + 'diaeresis' (NFD -> NFC)
             // 'e' is 0x65, 'diaeresis' is 0xCC 0x88
-            0x65 | 0x45 if read_idx + 2 < bytes.len() 
-                && bytes[read_idx+1] == 0xCC && bytes[read_idx+2] == 0x88 => {
+            0x65 | 0x45 if read_idx + 2 < bytes.len() && bytes[read_idx + 1] == 0xCC && bytes[read_idx + 2] == 0x88 => {
                 bytes[write_idx] = 0xC3;
                 bytes[write_idx + 1] = 0xAB; // Store as 'ë'
                 read_idx += 3;
@@ -360,10 +392,9 @@ pub fn albanian_clean_inplace(s: &mut String) {
             }
         }
     }
-    
+
     bytes[write_idx..len].fill(b' '); // cleaner than the for loop I was using earlier
 
     // unsafe { s.set_len(write_idx); } // Update string length if we shrunk it
     // s.truncate(write_idx+1);
 }
-
