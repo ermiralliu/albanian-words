@@ -301,7 +301,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
         // sentence_normalization_buffer.clear();
         // sentence_lowercasing_buffer.clear();
-        if count >= 10 {
+        if count >= 1000 {
             break;
         }
     }
@@ -364,47 +364,6 @@ pub fn albanian_clean_inplace(s: &mut String) {
     bytes[write_idx..len].fill(b' '); // cleaner than the for loop I was using earlier
 
     // unsafe { s.set_len(write_idx); } // Update string length if we shrunk it
-    // s.truncate(write_idx);
+    // s.truncate(write_idx+1);
 }
 
-// pub fn albanian_clean_and_bubble(s: &mut String) {
-//     let bytes = unsafe { s.as_mut_vec() };
-//     let mut i = 0;
-
-//     while i < bytes.len() {
-//         match bytes[i] {
-//             // 1. Lowercase A-Z
-//             b'A'..=b'Z' => {
-//                 bytes[i] += 32;
-//                 i += 1;
-//             }
-//             // 2. Handle Composed Ë/ë or Ç/ç (2 bytes) - No shift needed
-//             0xC3 if i + 1 < bytes.len() => {
-//                 match bytes[i + 1] {
-//                     0x8B => bytes[i + 1] = 0xAB, // Ë -> ë
-//                     0x87 => bytes[i + 1] = 0xA7, // Ç -> ç
-//                     _ => {}
-//                 }
-//                 i += 2;
-//             }
-//             // 3. Handle Decomposed E + diaeresis (3 bytes) -> Needs 1-byte bubble
-//             0x65 | 0x45 if i + 2 < bytes.len() 
-//                 && bytes[i+1] == 0xCC && bytes[i+2] == 0x88 => {
-                
-//                 // Convert current position to 2-byte 'ë'
-//                 bytes[i] = 0xC3;
-//                 bytes[i+1] = 0xAB;
-
-//                 // Move the "hole" to the end of the word
-//                 let mut j = i + 2;
-//                 while j + 1 < bytes.len() && bytes[j+1].is_ascii_alphanumeric() {
-//                     bytes[j] = bytes[j+1]; // Shift the word left
-//                     j += 1;
-//                 }
-//                 bytes[j] = b' '; // Place the space at the word boundary
-//                 i += 2; // Move 'i' to the next byte after our new 'ë'
-//             }
-//             _ => i += 1,
-//         }
-//     }
-// }
