@@ -19,7 +19,7 @@ const DEFAULT_WORD_BUFFER_CAPACITY: usize = 256;
 pub struct AlbanianParser<'a> {
     vocab: &'a HashMap<&'a str, u16>,
     normalization_buffer: String, // after normalizing ë andç
-    main_buffer: String,          // after lowercasing the normalization buffer
+    // main_buffer: String,          // after lowercasing the normalization buffer
     base_form: String,            // after lowercasing the normalization buffer
 }
 
@@ -28,7 +28,7 @@ impl<'a> AlbanianParser<'a> {
         AlbanianParser {
             vocab,
             normalization_buffer: String::with_capacity(DEFAULT_WORD_BUFFER_CAPACITY),
-            main_buffer: String::with_capacity(DEFAULT_WORD_BUFFER_CAPACITY),
+            // main_buffer: String::with_capacity(DEFAULT_WORD_BUFFER_CAPACITY),
             base_form: String::with_capacity(DEFAULT_WORD_BUFFER_CAPACITY),
         }
     }
@@ -76,18 +76,22 @@ impl<'a> AlbanianParser<'a> {
     // }
 
     pub fn single_verb_to_base(&mut self, verb: &str) -> Option<u16> {
-        self.normalization_buffer.clear();
-        self.main_buffer.clear();
-        self.base_form.clear();
+        // self.normalization_buffer.clear();
+        // self.main_buffer.clear();
+        // self.base_form.clear();
 
-        self.normalization_buffer.extend(verb.nfc());
-        // I don't like it but I was basically forced to use two different buffers.
-        self.main_buffer.extend(
-            // Had to do this because lowercasing would create a String otherwise.
-            // I still have to read the assembly. If the assembly is bad, I'll implement it myself
-            self.normalization_buffer.chars().flat_map(|ch| ch.to_lowercase()),
-        );
-        self.base_form.push_str(&self.main_buffer); // This is the variable we will test
+        // self.normalization_buffer.extend(verb.nfc());
+        // // I don't like it but I was basically forced to use two different buffers.
+        // self.main_buffer.extend(
+        //     // Had to do this because lowercasing would create a String otherwise.
+        //     // I still have to read the assembly. If the assembly is bad, I'll implement it myself
+        //     self.normalization_buffer.chars().flat_map(|ch| ch.to_lowercase()),
+        // );
+        // self.main_buffer.push_str(verb); // this probably doesn't need to be pushed
+                                                 // and should be used directly
+        // Yeah, I'm passing verb directly into the function now.
+        self.base_form.clear();
+        self.base_form.push_str(verb); // This is the variable we will test
         const CHECKS: &[(usize, SuffixFunction)] = &[
             (4, suffix_4char),
             (3, suffix_3char),
@@ -97,17 +101,18 @@ impl<'a> AlbanianParser<'a> {
 
         CHECKS
             .iter()
-            .find_map(|&(len, func)| self.possibilities_for_verb(len, func))
+            .find_map(|&(len, func)| self.possibilities_for_verb(verb, len, func))
     }
 
-    fn possibilities_for_verb(&mut self, suffix_char_len: usize, suffix_function: SuffixFunction) -> Option<u16> {
+    fn possibilities_for_verb(&mut self, verb: &str, suffix_char_len: usize, suffix_function: SuffixFunction) -> Option<u16> {
         // usually you know how much I don't like unnecessary functions but this is repeated 4 times,
         // and this way it probably has more instruction cache advantages
-        if let Some((suffix_offset, _ch)) = self.main_buffer.char_indices().nth_back(suffix_char_len - 1) {
-            let suffix = &self.main_buffer[suffix_offset..];
+        let main_buffer = verb;
+        if let Some((suffix_offset, _ch)) = main_buffer.char_indices().nth_back(suffix_char_len - 1) {
+            let suffix = &main_buffer[suffix_offset..];
             #[cfg(debug_assertions)]
             {
-                println!("Verb: {}, Suffix: {}", self.main_buffer, suffix);
+                // println!("Verb: {}, Suffix: {}", main_buffer, suffix);
             }
             if let Some(possibilities) = suffix_function(suffix) {
                 for el in possibilities {
@@ -118,15 +123,15 @@ impl<'a> AlbanianParser<'a> {
                         // production code.
                         #[cfg(debug_assertions)]
                         {
-                            let base_form = &self.base_form;
-                            dbg!(base_form);
+                            // let base_form = &self.base_form;
+                            // dbg!(base_form);
                         }
-                        self.base_form.replace_range(.., &self.main_buffer);
+                        self.base_form.replace_range(.., &main_buffer);
                         return Some(*matching_word); // we return on the first match. This is a bit
                         // this is a bit tightly coupled ngl
                     };
                 }
-                self.base_form.replace_range(.., &self.main_buffer);
+                self.base_form.replace_range(.., &main_buffer);
                 // I wish there was a way that doesn't require setting this twice.
             }
         }

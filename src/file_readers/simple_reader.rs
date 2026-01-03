@@ -47,12 +47,12 @@ impl FileData {
             Some(ret_slice)
         })
     }
-
-    pub fn get(&self, index: usize) -> Option<&[u8]> {
-        self.delimiter_indices
-            .get(index)
-            .map(|(start, end)| &self.buffer[*start..*end])
-    }
+    //
+    // pub fn get(&self, index: usize) -> Option<&[u8]> {
+    //     self.delimiter_indices
+    //         .get(index)
+    //         .map(|(start, end)| &self.buffer[*start..*end])
+    // }
 
     pub fn len(&self) -> usize {
         self.delimiter_indices.len()

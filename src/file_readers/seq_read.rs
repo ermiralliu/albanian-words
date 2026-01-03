@@ -54,9 +54,10 @@ impl SequentialFileReader {
             }
 
             // Convert to string and process
-            let Ok(line) = std::str::from_utf8(&self.buffer) else {
-                return None; 
-            };
+            // let Ok(line) = std::str::from_utf8(&self.buffer) else {
+            //     return None; 
+            // };
+            let line = unsafe { std::str::from_utf8_unchecked(&self.buffer)};
             // I would have wanted to use the unchecked version ngl
 
             // let line = line.trim(); // Remove newline and whitespace // this will be removed by
