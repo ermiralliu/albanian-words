@@ -242,15 +242,16 @@ const STOP_WORDS: &[&str] = &[
 ];
 
 const WORD_DELIMITERS: &[u8] = &[
-    b'.', b',', b'/', b'\\', b' ', b'\n', b'\t', b'\"', b'\'', b':', b';', b'!', b'?', b'(', b')', b'[', b']', b'\r', 0x1E, 0x1F
+    b'.', b',', b'/', b'\\', b' ', b'\n', b'\t', b'\"', b'\'', b':', b';', b'!', b'?', b'(', b')', b'[', b']', b'\r',
+    0x1E, 0x1F,
 ];
 
 const WORD_DELIMITER_BITSET: [bool; 256] = {
-    let mut init  = [false; 256];
+    let mut init = [false; 256];
     let mut i = 0;
     while i < WORD_DELIMITERS.len() {
         init[WORD_DELIMITERS[i] as usize] = true;
-        i+=1;
+        i += 1;
     }
     init
 };
@@ -261,6 +262,8 @@ const WORD_DELIMITER_BITSET: [bool; 256] = {
 //         // kinda ruins stuff
 //         // so using this non regex method is not that secure maybe?
 // ];
+
+const DEFAULT_VEC_CAPACITY: usize = 256*1024;
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     println!("Hello, world!");
@@ -286,6 +289,10 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let mut count = 0;
     let set: HashSet<&[u8]> = STOP_WORDS.iter().copied().map(|word| word.as_bytes()).collect();
     // let regex: Regex = Regex::new(r"([a-zëç-]+)")?; // Only lowercase since we alr
+    // let article_iterator = std::iter::from_fn(|| {
+    //     let mut buf = Vec::with_capacity(DEFAULT_VEC_CAPACITY);
+    //     if sr.read_into(&mut buf) { Some(buf) } else { None }
+    // });
     while sr.read_into(&mut article_buffer) {
         count += 1;
         // sentence_lowercasing_buffer.extend(line.nfc());
@@ -357,91 +364,19 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     // let Some(n) = return_some_option() else { return };
 }
 
-pub fn albanian_clean_inplace(bytes: &mut Vec<u8>) {
-    let mut read_idx = 0;
-    let mut write_idx = 0;
-    let len = bytes.len();
-
-    while read_idx < len {
-        match bytes[read_idx] {
-            // 1. Handle Decomposed 'e' or 'E' + 'diaeresis' (NFD -> NFC)
-            // Shrinks 3 bytes into 2 bytes
-            0x65 | 0x45 if read_idx + 2 < len && bytes[read_idx + 1] == 0xCC && bytes[read_idx + 2] == 0x88 => {
-                bytes[write_idx] = 0xC3;
-                bytes[write_idx + 1] = 0xAB; // 'ë'
-                read_idx += 3;
-                write_idx += 2;
-            }
-
-            // 2. Handle ASCII Uppercase -> Lowercase
-            b'A'..=b'Z' => {
-                bytes[write_idx] = bytes[read_idx] + 32;
-                read_idx += 1;
-                write_idx += 1;
-            }
-
-            // 3. Handle Albanian Ç / ç and Ë / ë (UTF-8 lead byte 0xC3)
-            0xC3 if read_idx + 1 < len => {
-                let next = bytes[read_idx + 1];
-                bytes[write_idx] = 0xC3;
-                match next {
-                    0x8B | 0xAB => bytes[write_idx + 1] = 0xAB, // ë
-                    0x87 | 0xA7 => bytes[write_idx + 1] = 0xA7, // ç
-                    _ => bytes[write_idx + 1] = next,
-                }
-                read_idx += 2;
-                write_idx += 2;
-            }
-
-            // 4. Handle Multi-byte Delimiters (3 bytes: “, ”, –)
-            // Replace with spaces to "flatten" for the split() call later
-            0xE2 if read_idx + 2 < len && bytes[read_idx + 1] == 0x80 => {
-                let third = bytes[read_idx + 2];
-                if third == 0x9C || third == 0x9D || third == 0x93 || third == 0x98 || third == 0x99 {
-                    // Here are the special single and double quotes and dash that some articles used
-                    bytes[write_idx] = b' '; // Flatten to a single space
-                    read_idx += 3; // Consume 3 bytes
-                    write_idx += 1; // Advance 1 byte in output
-                } else {
-                    // Not a target delimiter, copy the lead byte
-                    bytes[write_idx] = bytes[read_idx];
-                    read_idx += 1;
-                    write_idx += 1;
-                }
-            }
-
-            // 5. Everything else
-            _ => {
-                if read_idx != write_idx {
-                    bytes[write_idx] = bytes[read_idx];
-                }
-                read_idx += 1;
-                write_idx += 1;
-            }
-        }
-    }
-
-    // Finalize the length of the vector
-    // This is better than fill(b' ') because it makes the buffer shorter
-    // so subsequent processing (splitting) has less data to look at.
-    unsafe {
-        bytes.set_len(write_idx);
-    }
-}
-
 fn next_word_inplace(src: &mut [u8], cursor: &mut usize) -> Option<(usize, usize, bool)> {
     let len = src.len();
 
     // 1. Skip leading delimiters (including the 3-byte ones)
     while *cursor < len {
         let b = src[*cursor];
-        
+
         // Handle ASCII delimiters
         if WORD_DELIMITER_BITSET[b as usize] {
             *cursor += 1;
             continue;
         }
-        
+
         // Handle 3-byte delimiters at the start
         if b == 0xE2 && *cursor + 2 < len && src[*cursor + 1] == 0x80 {
             let third = src[*cursor + 2];
@@ -450,11 +385,13 @@ fn next_word_inplace(src: &mut [u8], cursor: &mut usize) -> Option<(usize, usize
                 continue;
             }
         }
-        
+
         break; // Found a non-delimiter byte
     }
 
-    if *cursor >= len { return None; }
+    if *cursor >= len {
+        return None;
+    }
 
     let word_start = *cursor;
     let mut write_idx = *cursor;
@@ -467,7 +404,7 @@ fn next_word_inplace(src: &mut [u8], cursor: &mut usize) -> Option<(usize, usize
         // ASCII Delimiter check
         if WORD_DELIMITERS.contains(&b) {
             // We do NOT increment cursor here; the next call's "skip" logic handles it
-            break; 
+            break;
         }
 
         match b {
