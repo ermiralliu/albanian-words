@@ -2,6 +2,8 @@ pub mod alb_parser;
 pub mod file_readers;
 use std::{
     collections::{HashMap, HashSet},
+    sync::Mutex,
+    thread,
     time::Instant,
     vec,
 };
@@ -263,7 +265,7 @@ const WORD_DELIMITER_BITSET: [bool; 256] = {
 //         // so using this non regex method is not that secure maybe?
 // ];
 
-const DEFAULT_VEC_CAPACITY: usize = 256*1024;
+const DEFAULT_VEC_CAPACITY: usize = 256 * 1024;
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     println!("Hello, world!");
@@ -273,95 +275,83 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     for (i, &word) in vocab_vector.iter().enumerate() {
         map.insert(word, i as u16);
     }
-    let mut parser = AlbanianParser::new(&map);
-    // for el in parser.verb_to_base(&verbs) {
-    //     println!("{}", vocab_vector[el as usize]);
-    // }
+
     let start = Instant::now();
 
     let mut sr = seq_read::SequentialFileReader::try_new(
         "/home/ermir/Documents/Diploma/csv_processing/finalized-content/test_content.txt",
         b'\x1E',
     )?;
-    let mut token_container = Vec::new();
-    // let mut sentence_normalization_buffer = String::with_capacity(256 * 1024);
-    let mut article_buffer: Vec<u8> = Vec::with_capacity(256 * 1024);
-    let mut count = 0;
+    // let mut count = 0;
     let set: HashSet<&[u8]> = STOP_WORDS.iter().copied().map(|word| word.as_bytes()).collect();
-    // let regex: Regex = Regex::new(r"([a-zëç-]+)")?; // Only lowercase since we alr
-    // let article_iterator = std::iter::from_fn(|| {
-    //     let mut buf = Vec::with_capacity(DEFAULT_VEC_CAPACITY);
-    //     if sr.read_into(&mut buf) { Some(buf) } else { None }
-    // });
-    while sr.read_into(&mut article_buffer) {
-        count += 1;
-        // sentence_lowercasing_buffer.extend(line.nfc());
 
-        // sentence_lowercasing_buffer.extend(sentence_normalization_buffer.chars().flat_map(|ch| ch.to_lowercase()));
-        // albanian_clean_inplace(&mut article_buffer);
-        // #[cfg(debug_assertions)]
-        // {
-        //     println!("Word: {:?}", unsafe { str::from_utf8_unchecked(&article_buffer[..]) },);
-        // }
+    // These live on the stack of main
+    let shared_reader = Mutex::new(sr);
+    // 'set' and 'parser' can just be regular references
 
-        // normalized
-        // separate each word
-        let mut sentence_tokens = Vec::new();
-        // let clean_words = article_buffer
-        //     .split(|x| WORD_DELIMITERS.contains(x))
-        //     .filter(|s| s.len() > 1 && !set.contains(s));
-        let mut cursor = 0; // this number simply holds the byte offset we're currently in
-        while let Some((start, end, is_numeric)) = next_word_inplace(&mut article_buffer, &mut cursor) {
-            if is_numeric {
-                // po e le keshtu por normalisht ktu do behet push vec nje placeholder id.
-                continue;
-            }
-            if end - start < 2 {
-                continue;
-            }
-            let mat_str = &article_buffer[start..end];
-            if set.contains(mat_str) {
-                continue;
-            }
-            #[cfg(debug_assertions)]
-            {
-                // println!(
-                //     "Word: {:?}, len: {}",
-                //     unsafe { str::from_utf8_unchecked(mat_str) },
-                //     mat_str.len()
-                // );
-            }
-            // if mat_str.len() == 570 {
-            //     println!("Line: {}", unsafe{ std::str::from_utf8_unchecked(&article_buffer[..])});
-            //     println!("{}", unsafe { std::str::from_utf8_unchecked(mat_str) });
-            //     return Ok(());
-            // }
+    let final_tokens: Vec<Vec<u16>> = thread::scope(|s| {
+        let mut handles = vec![];
 
-            // if mat_str.parse::<f64>().is_ok() { // need to find a new way to handle numbers
-            if let Some(nr) = parser.single_verb_to_base(mat_str) {
-                sentence_tokens.push(nr);
-            } else {
-                sentence_tokens.push(0);
-            }
-        }
-        #[cfg(debug_assertions)]
-        {
-            // println!("Line: {}\nTokenized:{:?}", line, sentence_tokens);
-        }
-        if !sentence_tokens.is_empty() {
-            token_container.push(sentence_tokens);
+        for _ in 0..2 {
+            // We borrow from the outer scope
+            let r = &shared_reader;
+            let stop_words = &set;
+            let mut local_parser = AlbanianParser::new(&map);
+
+            let h = s.spawn(move || {
+                let mut local_buf = Vec::with_capacity(DEFAULT_VEC_CAPACITY);
+                let mut thread_results = Vec::new();
+
+                loop {
+                    local_buf.clear();
+                    // Lock the reader just to fill the buffer
+                    {
+                        let mut reader = r.lock().unwrap();
+                        if !reader.read_into(&mut local_buf) {
+                            break;
+                        }
+                    }
+
+                    let mut article_tokens = Vec::new();
+                    let mut cursor = 0;
+
+                    while let Some((start, end, is_num)) = next_word_inplace(&mut local_buf, &mut cursor) {
+                        if end - start < 2 {
+                            continue;
+                        }
+                        if is_num {
+                            continue;
+                        }
+
+                        let word = &local_buf[start..end];
+                        if stop_words.contains(word) {
+                            continue;
+                        }
+
+                        if let Some(nr) = local_parser.single_verb_to_base(word) {
+                            article_tokens.push(nr);
+                        } else {
+                            article_tokens.push(0);
+                        }
+                    }
+
+                    if !article_tokens.is_empty() {
+                        thread_results.push(article_tokens);
+                    }
+                }
+                thread_results
+            });
+            handles.push(h);
         }
 
-        if count >= 100000 {
-            break;
-        }
-        article_buffer.clear();
-    }
+        // Join is automatic at the end of the scope, but we collect results here
+        handles.into_iter().flat_map(|h| h.join().unwrap()).collect()
+    });
+
     let end = Instant::now();
-    println!("{:?}", token_container[token_container.len() - 1]);
+    println!("{:?}", final_tokens[final_tokens.len() - 1]);
     println!("Time passed: {:?}", (end - start));
     Ok(())
-    // let Some(n) = return_some_option() else { return };
 }
 
 fn next_word_inplace(src: &mut [u8], cursor: &mut usize) -> Option<(usize, usize, bool)> {
