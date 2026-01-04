@@ -2,7 +2,7 @@ use std::collections::HashMap;
 // use unicode_normalization::UnicodeNormalization;
 
 // type SuffixFunction = fn(&str) -> Option<&[&str]>;
-type SuffixFunction = fn(&[u8]) -> Option<&[&[u8]]>;
+type SuffixFunction = fn(u64) -> Option<&'static [&'static [u8]]>;
 
 // using &[u8] lets you have fun without worrying about sizes. Nice Rust stuff.
 // em dash might also appear, but I think that shit will likely have spaces around, so who cares.
@@ -15,7 +15,7 @@ const WORD_DELIMITERS: &[u8] = &[
 const CATEGORY_DELIMITER: u8 = b'\n';
 
 const DEFAULT_WORD_BUFFER_CAPACITY: usize = 8192; // Increased this size only because of some
-                                                  // retarded articles
+// retarded articles
 
 pub struct AlbanianParser<'a> {
     vocab: &'a HashMap<&'a [u8], u16>,
@@ -38,8 +38,9 @@ impl<'a> AlbanianParser<'a> {
 
     pub fn single_verb_to_base(&mut self, verb: &[u8]) -> Option<u16> {
         // we can use copy non-overlapping if the copy below is not enough
-                self.base_form[..verb.len()].copy_from_slice(verb);
-        self.base_form_len = verb.len();
+        self.base_form[..verb.len()].copy_from_slice(verb);
+        let len = verb.len();
+        self.base_form_len = len;
         const CHECKS: &[(usize, SuffixFunction)] = &[
             (5, suffix_5byte),
             (4, suffix_4byte),
@@ -47,15 +48,23 @@ impl<'a> AlbanianParser<'a> {
             (2, suffix_2byte),
             (1, suffix_1byte),
         ];
+        let initial_suffix = match len {
+            0..=2 => return None,
+            3..=6 => byte_arr_to_nr(&verb[2..]),
+            7.. => byte_arr_to_nr(&verb[len - 5..]),
+        };
 
         CHECKS
             .iter()
-            .find_map(|&(len, func)| self.possibilities_for_verb(verb, len, func))
+            .filter(|&(length, _)| length < &verb.len())
+            .find_map(|&(len, func)| self.possibilities_for_verb(verb, initial_suffix, len, func))
     }
 
-    fn possibilities_for_verb( // this part is a little bit too much for what it's doing
+    fn possibilities_for_verb(
+        // this part is a little bit too much for what it's doing
         &mut self,
         verb: &[u8],
+        initial_suffix: u64,
         suffix_byte_len: usize,
         suffix_function: SuffixFunction,
     ) -> Option<u16> {
@@ -64,9 +73,9 @@ impl<'a> AlbanianParser<'a> {
         let main_buffer = verb;
         if main_buffer.len() >= suffix_byte_len {
             let suffix_offset = main_buffer.len() - suffix_byte_len;
-            let suffix = &main_buffer[suffix_offset..];
+            // let suffix = &main_buffer[suffix_offset..];
 
-            if let Some(possibilities) = suffix_function(suffix) {
+            if let Some(possibilities) = suffix_function(initial_suffix) {
                 for el in possibilities {
                     let el_bytes = el;
 
@@ -96,14 +105,20 @@ impl<'a> AlbanianParser<'a> {
     }
 }
 
+// I initially forgot that these have to be in little endian
+const LAST_4_BYTES: u64 = 0xFFFF_FFFF_0000_0000;
+const LAST_3_BYTES: u64 = 0xFFFF_FF_0000_0000;
+const LAST_2_BYTES: u64 = 0xFFFF_0000_0000_0000;
+const LAST_BYTE: u64 = 0xFF00_0000_0000_0000;
 
 const fn byte_arr_to_nr(st: &[u8]) -> u64 {
     let mut s = 0u64; // Initialize 8 bytes of zeros
     let len = st.len();
+    let dest_start = unsafe { (&mut s as *mut u64 as *mut u8).add(8 - len) };
 
     unsafe {
         // This is a direct raw pointer copy (memcpy)
-        std::ptr::copy_nonoverlapping(st.as_ptr(), &mut s as *mut u64 as *mut u8, len);
+        std::ptr::copy_nonoverlapping(st.as_ptr(), dest_start, len);
     }
     s
 }
@@ -115,10 +130,11 @@ const A: u64 = byte_arr_to_nr(b"a");
 const E: u64 = byte_arr_to_nr(b"e");
 const I: u64 = byte_arr_to_nr(b"i");
 
-fn suffix_1byte(ch: &[u8]) -> Option<&[&'static [u8]]> {
+fn suffix_1byte(ch: u64) -> Option<&'static [&'static [u8]]> {
     // For now, I'm keeping it simple with
     // static lifetimes
-    let mat: &[&[u8]] = match byte_arr_to_nr(ch) {
+    let final_byte = ch & LAST_BYTE;
+    let mat: &[&[u8]] = match final_byte {
         U => &[b"j", b"e", b""],
         J | N => &[b"j"],
         A | E | I => &[b""],
@@ -144,9 +160,9 @@ const RA: u64 = byte_arr_to_nr(b"ra");
 const RI: u64 = byte_arr_to_nr(b"ri");
 const UR: u64 = byte_arr_to_nr(b"ur");
 
-fn suffix_2byte(st: &[u8]) -> Option<&[&'static [u8]]> {
+fn suffix_2byte(st: u64) -> Option<&'static [&'static [u8]]> {
     // only the last two elements of the string are passed
-    let mat: &[&[u8]] = match byte_arr_to_nr(st) {
+    let mat: &[&[u8]] = match st & LAST_2_BYTES {
         // this one needed explicit coercion
         E_DIAERESIS => &[b""],
         OI => &[b"oj", b"uaj"],
@@ -187,8 +203,8 @@ const NTE: u64 = byte_arr_to_nr(b"nte");
 const TUR: u64 = byte_arr_to_nr(b"tur");
 const UAR: u64 = byte_arr_to_nr(b"uar");
 
-fn suffix_3byte(st: &[u8]) -> Option<&[&'static [u8]]> {
-    let mat: &[&[u8]] = match byte_arr_to_nr(st) {
+fn suffix_3byte(st: u64) -> Option<&'static [&'static [u8]]> {
+    let mat: &[&[u8]] = match st & LAST_3_BYTES {
         MË | TË | NË => &[b"j", b"e", b""], // + "e" per shtie? but really low
         RË => &[b"j"],
         ËM | ËT | ËN => &[b""], // kto me ë psh do kalohen te ato qe duan 3
@@ -208,8 +224,8 @@ const TËM: u64 = byte_arr_to_nr("tëm".as_bytes());
 const TËT: u64 = byte_arr_to_nr("tët".as_bytes());
 const TËN: u64 = byte_arr_to_nr("tën".as_bytes());
 
-fn suffix_4byte(st: &[u8]) -> Option<&[&'static [u8]]> {
-    let mat: &[&[u8]] = match byte_arr_to_nr(st) {
+fn suffix_4byte(st: u64) -> Option<&'static [&'static [u8]]> {
+    let mat: &[&[u8]] = match st & LAST_4_BYTES {
         JMË | JNË => &[b"j"],
         TËM | TËT | TËN => &[b"j", b""],
         _ => return None,
@@ -222,8 +238,8 @@ const JTËT: u64 = byte_arr_to_nr("jtët".as_bytes());
 const JTËN: u64 = byte_arr_to_nr("jtën".as_bytes());
 const JTUR: u64 = byte_arr_to_nr("jtur".as_bytes());
 
-fn suffix_5byte(st: &[u8]) -> Option<&[&'static [u8]]> {
-    let mat: &[&[u8]] = match byte_arr_to_nr(st) {
+fn suffix_5byte(st: u64) -> Option<&'static [&'static [u8]]> {
+    let mat: &[&[u8]] = match st {
         JTËM | JTËT | JTËN | JTUR => &[b"j"],
         _ => return None,
     };
