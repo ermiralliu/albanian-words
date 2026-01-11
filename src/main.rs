@@ -1,5 +1,6 @@
 pub mod alb_parser;
 pub mod file_readers;
+pub mod stop_words;
 use std::{
     collections::{HashMap, HashSet},
     sync::Mutex,
@@ -10,253 +11,77 @@ use std::{
 
 use alb_parser::AlbanianParser;
 use file_readers::seq_read;
-
-const STOP_WORDS: &[&str] = &[
-    "e",
-    "të",
-    "i",
-    "me",
-    "që",
-    "në",
-    "një",
-    "a",
-    "për",
-    "sh",
-    "nga",
-    "ka",
-    "u",
-    "është",
-    "dhe",
-    "shih",
-    "nuk",
-    "m",
-    "diçka",
-    "ose",
-    "si",
-    "shumë",
-    "etj",
-    "se",
-    "pa",
-    "sipas",
-    "s",
-    "t",
-    "dikujt",
-    "dikë",
-    "mirë",
-    "vetë",
-    "bëj",
-    "ai",
-    "vend",
-    "prej",
-    "ja",
-    "duke",
-    "tjetër",
-    "kur",
-    "ia",
-    "ku",
-    "ta",
-    "keq",
-    "dy",
-    "bën",
-    "bërë",
-    "bëhet",
-    "diçkaje",
-    "edhe",
-    "madhe",
-    "la",
-    "sa",
-    "gjatë",
-    "zakonisht",
-    "pas",
-    "veta",
-    "mbi",
-    "disa",
-    "iu",
-    "mos",
-    "ç",
-    "para",
-    "dikush",
-    "gjë",
-    "bë",
-    "pak",
-    "tek",
-    "farë",
-    "bëri",
-    "po",
-    "bie",
-    "k",
-    "do",
-    "gjithë",
-    "vete",
-    "mund",
-    "kam",
-    "lë",
-    "jo",
-    "bëje",
-    "tij",
-    "kanë",
-    "ishte",
-    "janë",
-    "vjen",
-    "atë",
-    "këtë",
-    "nëpër",
-    "çdo",
-    "na",
-    "marrë",
-    "merr",
-    "mori",
-    "rri",
-    "deri",
-    "b",
-    "kishte",
-    "mban",
-    "përpara",
-    "tyre",
-    "marr",
-    "gjitha",
-    "as",
-    "vetëm",
-    "nën",
-    "herë",
-    "tjera",
-    "tjerët",
-    "drejt",
-    "qenët",
-    "ndonjë",
-    "nëse",
-    "jap",
-    "merret",
-    "rreth",
-    "lloj",
-    "dot",
-    "saj",
-    "ndër",
-    "ndërsa",
-    "cila",
-    "veten",
-    "ma",
-    "ndaj",
-    "mes",
-    "ajo",
-    "cilën",
-    "por",
-    "ndërmjet",
-    "prapa",
-    "mi",
-    "tërë",
-    "jam",
-    "ashtu",
-    "kësaj",
-    "tille",
-    "bëhem",
-    "cilat",
-    "kjo",
-    "menjëherë",
-    "ça",
-    "je",
-    "aq",
-    "aty",
-    "pranë",
-    "ato",
-    "pasur",
-    "qenë",
-    "cilin",
-    "tepër",
-    "njëra",
-    "tej",
-    "krejt",
-    "kush",
-    "bëjnë",
-    "ti",
-    "bënë",
-    "midis",
-    "cili",
-    "ende",
-    "këto",
-    "kemi",
-    "siç",
-    "kryer",
-    "çilit",
-    "atij",
-    "gjithnjë",
-    "andej",
-    "sipër",
-    "sikur",
-    "këtej",
-    "cilës",
-    "ky",
-    "papritur",
-    "ua",
-    "kryesisht",
-    "gjithçka",
-    "pasi",
-    "kryhet",
-    "mjaft",
-    "këtij",
-    "përbashkët",
-    "ata",
-    "atje",
-    "vazhdimisht",
-    "kurrë",
-    "tonë",
-    "kështu",
-    "unë",
-    "sapo",
-    "rrallë",
-    "vetes",
-    "ishin",
-    "afërt",
-    "tjetrën",
-    "këtu",
-    "çfarë",
-    "to",
-    "anës",
-    "jemi",
-    "asaj",
-    "secila",
-    "kundrejt",
-    "këtyre",
-    "pse",
-    "tilla",
-    "mua",
-    "nëpërmjet",
-    "çilet",
-    "ndryshe",
-    "kishin",
-    "ju",
-    "tani",
-    "atyre",
-    "diç",
-    "ynë",
-    "kudo",
-    "sonë",
-    "sepse",
-    "çilave",
-    "kemi",
-    "ty",
-    "t",
-    "nbsp", // This needs more work though
-    "tha",
-    "re",
-    "the",
-    "€",
-];
+use stop_words::STOP_WORDS;
 
 const WORD_DELIMITERS: &[u8] = &[
     b'.', b',', b'/', b'\\', b' ', b'\n', b'\t', b'\"', b'\'', b':', b';', b'!', b'?', b'(', b')', b'[', b']', b'\r',
     0x1E, 0x1F,
 ];
+// const WEIRD_CHARACTERS: &[char] = &['“' , '”' , '‘' , '’' , '«' , '»' , '–' , '—' , '…'];
 
 const WORD_DELIMITER_BITSET: [bool; 256] = {
+    // These are the single character nes
     let mut init = [false; 256];
     let mut i = 0;
-    while i < WORD_DELIMITERS.len() {
-        init[WORD_DELIMITERS[i] as usize] = true;
+
+    while i < 256 {
+        match i {
+            0x00..=0x20 => init[i] = true,
+            // ASCII Punctuation (Excluding 0-9 which is 0x30-0x39)
+            0x21..=0x2F | 0x3A..=0x40 | 0x5B..=0x60 | 0x7B..=0x7F => init[i] = true,
+            _ => {}
+        }
         i += 1;
     }
     init
 };
+
+#[derive(Copy, Clone, Debug, PartialEq)]
+#[repr(u8)]
+pub enum CharClass {
+    // I had forgotten I could do this and that it's the best possible way of handling such cases.
+    // Delimiter = 0, // Space, punctuation, etc. // Why would i handle these differently?
+    // Ordering these by probability but that probably doesn't matter here ngl
+    Lower = 0,    // a-z
+    Upper = 1,    // A-Z
+    Other = 2, // Mostly whitespaces and punctuation and other stuff
+    Number = 3,   // 0-9
+    C3Prefix = 4, // 0xC3 (ë, ç)
+    Minus = 5,
+    CCPrefix = 6, // 0xCC (Combining marks)
+    Byte3 = 7, // We can instantly skip 3 bytes for these
+    Byte4 = 8, // We can skip 4 for these
+    // E2Prefix = 6,  // 0xE2 (Smart quotes)
+    // Foreign = 7,   // Everything else (ö, ü, Chinese, etc.)
+}
+
+const GET_CHAR_TYPE: [CharClass; 256] = {
+    let mut init = [CharClass::Other; 256];
+    let mut i: u8 = 0;
+
+    loop {
+        match i {
+            b'0'..=b'9' => init[i as usize] = CharClass::Number,
+            b'A'..=b'Z' => init[i as usize] = CharClass::Upper,
+            b'a'..=b'z' => init[i as usize] = CharClass::Lower,
+            0xE0..=0xEF => init[i as usize] = CharClass::Byte3,
+
+            // THE 4-BYTE ZONE (11110xxx)
+            0xF0..=0xF7 => init[i as usize] = CharClass::Byte4,
+            _ => {}
+        }
+        if i == 255 {
+            break;
+        }
+        i += 1;
+    }
+    init[b'-' as usize] = CharClass::Minus;
+    init[0xC3] = CharClass::C3Prefix; // To handle extended latin, to invalidate or get e and c 
+    init[0xCC] = CharClass::CCPrefix; // Individual diaeresis 0x88, cedilla 0xA7
+    // init[0xE2] = true;
+    init
+};
+
 
 // const WORD_DELIMITERS: &[char] = &[
 //     '.', ',', '/', '\\', ' ', '\n', '\t', '\"', '\'', ':', ';', '!', '?', '(', ')', '[', ']', '\r', '\x1E', '“', '”',
@@ -288,11 +113,12 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     // These live on the stack of main
     let shared_reader = Mutex::new(sr);
     // 'set' and 'parser' can just be regular references
+    let core_count = num_cpus::get_physical();
 
     let final_tokens: Vec<Vec<u16>> = thread::scope(|s| {
         let mut handles = vec![];
 
-        for _ in 0..2 {
+        for _ in 0..core_count {
             // We borrow from the outer scope
             let r = &shared_reader;
             let stop_words = &set;
@@ -467,4 +293,116 @@ fn next_word_inplace(src: &mut [u8], cursor: &mut usize) -> Option<(usize, usize
 #[inline(always)]
 fn is_edge_case_not_number(s: &[u8]) -> bool {
     s == b"." || s == b"-" || s == b".."
+}
+
+fn get_next_word(src: &mut [u8], cursor: &mut usize) -> Option<(usize, usize, bool)> {
+    let len = src.len();
+    let mut start = 0;
+    let mut end = 0;
+
+    // 1. Skip leading delimiters (including the 3-byte ones)
+    while *cursor < len {
+        let b = src[*cursor];
+
+        // Handle ASCII delimiters
+        if WORD_DELIMITER_BITSET[b as usize] {
+            *cursor += 1;
+            continue;
+        }
+
+        // Handle 3-byte delimiters at the start
+        if b == 0xE2 && *cursor + 2 < len && src[*cursor + 1] == 0x80 {
+            let third = src[*cursor + 2];
+            if third == 0x9C || third == 0x9D || third == 0x93 || third == 0x98 || third == 0x99 {
+                *cursor += 3;
+                continue;
+            }
+        }
+
+        break; // Found a non-delimiter byte
+    }
+
+    if *cursor >= len {
+        return None;
+    }
+
+    let word_start = *cursor;
+    let mut write_idx = *cursor;
+    let mut is_numeric = true;
+
+    // 2. Scan and transform
+    while *cursor < len {
+        let b = src[*cursor];
+
+        // ASCII Delimiter check
+        if WORD_DELIMITERS.contains(&b) {
+            // We do NOT increment cursor here; the next call's "skip" logic handles it
+            break;
+        }
+
+        match b {
+            // Rule 1: NFC Normalization (3 -> 2 bytes)
+            0x65 | 0x45 if *cursor + 2 < len && src[*cursor + 1] == 0xCC && src[*cursor + 2] == 0x88 => {
+                src[write_idx] = 0xC3;
+                src[write_idx + 1] = 0xAB;
+                write_idx += 2;
+                *cursor += 3;
+                is_numeric = false;
+            }
+
+            // Rule 2: ASCII Lowercase
+            b'A'..=b'Z' => {
+                src[write_idx] = b + 32;
+                write_idx += 1;
+                *cursor += 1;
+                is_numeric = false;
+            }
+
+            // Rule 3: Albanian Ë/Ç
+            0xC3 if *cursor + 1 < len => {
+                let next = src[*cursor + 1];
+                src[write_idx] = 0xC3;
+                match next {
+                    0x8B | 0xAB => src[write_idx + 1] = 0xAB,
+                    0x87 | 0xA7 => src[write_idx + 1] = 0xA7,
+                    _ => src[write_idx + 1] = next,
+                }
+                write_idx += 2;
+                *cursor += 2;
+                is_numeric = false;
+            }
+
+            // Rule 4: 3-byte Delimiters (The "Stuck" fix)
+            0xE2 if *cursor + 2 < len && src[*cursor + 1] == 0x80 => {
+                let third = src[*cursor + 2];
+                if third == 0x9C || third == 0x9D || third == 0x93 || third == 0x98 || third == 0x99 {
+                    // Stop word here. We don't increment cursor; the skip logic above will jump 3.
+                    break;
+                } else {
+                    src[write_idx] = b;
+                    write_idx += 1;
+                    *cursor += 1;
+                    is_numeric = false;
+                }
+            }
+
+            // Rule 5: Standard scan
+            _ => {
+                if is_numeric && !b.is_ascii_digit() && b != b'.' && b != b'-' {
+                    is_numeric = false;
+                }
+                if write_idx != *cursor {
+                    src[write_idx] = b;
+                }
+                write_idx += 1;
+                *cursor += 1;
+            }
+        }
+    }
+
+    if is_numeric && (write_idx == word_start || is_edge_case_not_number(&src[word_start..write_idx])) {
+        is_numeric = false;
+    }
+
+    Some((word_start, write_idx, is_numeric))
 }
