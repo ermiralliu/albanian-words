@@ -1,6 +1,5 @@
 use std::{fs::File, io::Read};
 
-use memchr::memchr;
 
 pub struct FileData {
     buffer: Vec<u8>,

@@ -1,9 +1,10 @@
 pub mod alb_parser;
 pub mod file_readers;
+pub mod properties;
 pub mod stop_words;
+
 use std::{
     collections::{HashMap, HashSet},
-    fmt::write,
     sync::Mutex,
     thread,
     time::Instant,
@@ -12,24 +13,9 @@ use std::{
 
 use alb_parser::AlbanianParser;
 use file_readers::seq_read;
+use properties::Properties;
+use std::env;
 use stop_words::STOP_WORDS;
-
-const WORD_DELIMITER_BITSET: [bool; 256] = {
-    // These are the single character nes
-    let mut init = [false; 256];
-    let mut i = 0;
-
-    while i < 256 {
-        match i {
-            0x00..=0x20 => init[i] = true,
-            // ASCII Punctuation (Excluding 0-9 which is 0x30-0x39)
-            0x21..=0x2F | 0x3A..=0x40 | 0x5B..=0x60 | 0x7B..=0x7F => init[i] = true,
-            _ => {}
-        }
-        i += 1;
-    }
-    init
-};
 
 #[derive(Copy, Clone, Debug, PartialEq)]
 #[repr(u8)]
@@ -37,17 +23,17 @@ pub enum CharClass {
     // I had forgotten I could do this and that it's the best possible way of handling such cases.
     // Delimiter = 0, // Space, punctuation, etc. // Why would i handle these differently?
     // Ordering these by probability but that probably doesn't matter here ngl
-    Lower = 0,    // a-z
-    Upper = 1,    // A-Z
-    Other = 2,    // Mostly whitespaces and punctuation and other stuff
-    Number = 3,   // 0-9
-    C3Prefix = 4, // 0xC3 (ë, ç)
-    CCPrefix = 5, // 0xCC (Combining marks)
-    Byte3 = 6,    // We can instantly skip 3 bytes for these
-    Byte4 = 7,    // We can skip 4 for these
-    StillNumber = 8, // If is_number, these are just delimiters
-                  // E2Prefix = 6,  // 0xE2 (Smart quotes)
-                  // Foreign = 7,   // Everything else (ö, ü, Chinese, etc.)
+    Lower,    // a-z
+    Upper,    // A-Z
+    Other,    // Mostly whitespaces and punctuation and other stuff
+    Number,   // 0-9
+    C3Prefix, // 0xC3 (ë, ç)
+    CCPrefix, // 0xCC (Combining marks)
+    Byte3,    // We can instantly skip 3 bytes for these
+    Byte4,    // We can skip 4 for these
+    StillNumber, // If is_number, these are just delimiters
+              // E2Prefix = 6,  // 0xE2 (Smart quotes)
+              // Foreign = 7,   // Everything else (ö, ü, Chinese, etc.)
 } // I'm giving up on the hyphen
 
 const GET_CHAR_TYPE: [CharClass; 256] = {
@@ -90,13 +76,21 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     for (i, &word) in vocab_vector.iter().enumerate() {
         map.insert(word, i as u16);
     }
+    let config = {
+        let config_file = env::var("CONFIG_FILE").unwrap_or("./config.ini".to_string());
+        match Properties::try_from_config_file(&config_file) {
+            Ok(props) => props,
+            Err(error) => {
+                eprintln!("Configuration file not found or invalid values found: {:?}", error);
+                return Ok(()); // Yeah I should return something worthwhile here
+            }
+        }
+    };
+    println!("Config information: {:#?}", config);
 
     let start = Instant::now();
 
-    let mut sr = seq_read::SequentialFileReader::try_new(
-        "/home/ermir/Documents/Diploma/csv_processing/finalized-content/test_content.txt",
-        b'\x1E',
-    )?;
+    let sr = seq_read::SequentialFileReader::try_new(&config.article_file, config.article_separator)?;
     // let mut count = 0;
     let set: HashSet<&[u8]> = STOP_WORDS.iter().copied().map(|word| word.as_bytes()).collect();
 
@@ -142,7 +136,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                         let word = &local_buf[start..end];
                         #[cfg(debug_assertions)]
                         {
-                            print!("{}, ", unsafe { str::from_utf8_unchecked(word)});
+                            print!("{}, ", unsafe { str::from_utf8_unchecked(word) });
                         }
                         if stop_words.contains(word) {
                             continue;
@@ -445,6 +439,7 @@ fn get_next_word(src: &mut [u8], cursor: &mut usize) -> Option<(usize, usize, bo
             CharClass::CCPrefix => read_idx += 2,
             CharClass::Byte3 => read_idx += 3,
             CharClass::Byte4 => read_idx += 4,
+            CharClass::Lower | CharClass::Upper | CharClass::C3Prefix | CharClass::Number => break 'finder read_idx,
             _ => break 'finder read_idx,
         }
     };
