@@ -1,6 +1,5 @@
-use std::{fs, io::Read};
+use std::{fmt, fs, io::Read};
 
-#[derive(Debug)]
 pub struct Properties {
     pub article_file: String,
     pub category_file: String,
@@ -8,8 +7,28 @@ pub struct Properties {
     pub category_list_boundary: u8,
     pub category_entry_separator: u8,
 }
+impl fmt::Debug for Properties {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        // Helper closure to format bytes based on your rule
+        let format_byte = |b: u8| -> String {
+            if b.is_ascii_control() {
+                format!("0x{:02X}", b) // Hex for control chars
+            } else {
+                format!("{}", b as char) // Char for "proper" chars
+            }
+        };
 
-const CONFIG_SIZE_LIMIT: usize = 128 + 8192;
+        f.debug_struct("Properties")
+            .field("article_file", &self.article_file)
+            .field("category_file", &self.category_file)
+            .field("article_separator", &format_byte(self.article_separator))
+            .field("category_list_boundary", &format_byte(self.category_list_boundary))
+            .field("category_entry_separator", &format_byte(self.category_entry_separator))
+            .finish()
+    }
+}
+
+const CONFIG_SIZE_LIMIT: usize = 16384;
 
 impl Properties {
     // The return type is quite nice. We build enums of our own to return the intended errors
@@ -42,6 +61,8 @@ impl Properties {
             match key {
                 // I think I have cleared this configuration part incredibly well ngl
                 "article_file" => {
+                    // A lot of this trimming logic seems reusable but idk.
+                    // This part doesn't need to be THAT good either way
                     let value = value.trim_matches(&['\'', '"']);
                     if value != "" {
                         prop_builder.article_file(value.to_string())
@@ -76,12 +97,12 @@ impl Properties {
 }
 
 fn str_to_delimiter(val: &str) -> Option<u8> {
-    dbg!(val);
     if val.starts_with("0x") {
         // Hexadecimal values
         return u8::from_str_radix(val.strip_prefix("0x").unwrap(), 16).ok();
-    } else if val.starts_with("'") {
-        // Characters
+    } else if val.len() == 1 {
+        return val.bytes().nth(0);
+    } else if val.starts_with("'"){
         return val.bytes().nth(1);
     } else {
         return None;

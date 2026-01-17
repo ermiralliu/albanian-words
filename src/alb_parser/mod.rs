@@ -5,14 +5,6 @@ use std::collections::HashMap;
 type SuffixFunction = fn(u64) -> Option<&'static [&'static [u8]]>;
 
 // using &[u8] lets you have fun without worrying about sizes. Nice Rust stuff.
-// em dash might also appear, but I think that shit will likely have spaces around, so who cares.
-const WORD_DELIMITERS: &[u8] = &[
-    b'.', b',', b'/', b'\\', b' ', b'\n', b'\t', b'\"', b'\'', b':', b';', b'!', b'?', b'(', b')', b'[', b']', b'\r',
-];
-
-// const CONTENT_DELIMITER: &str = "/endarticle";
-
-const CATEGORY_DELIMITER: u8 = b'\n';
 
 const DEFAULT_WORD_BUFFER_CAPACITY: usize = 8192; // Increased this size only because of some
 // retarded articles
@@ -29,8 +21,6 @@ impl<'a> AlbanianParser<'a> {
     pub fn new(vocab: &'a HashMap<&'a [u8], u16>) -> AlbanianParser<'a> {
         AlbanianParser {
             vocab,
-            // normalization_buffer: String::with_capacity(DEFAULT_WORD_BUFFER_CAPACITY),
-            // main_buffer: String::with_capacity(DEFAULT_WORD_BUFFER_CAPACITY),
             base_form: [0u8; DEFAULT_WORD_BUFFER_CAPACITY],
             base_form_len: 0,
         }

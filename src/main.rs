@@ -440,7 +440,7 @@ fn get_next_word(src: &mut [u8], cursor: &mut usize) -> Option<(usize, usize, bo
             CharClass::Byte3 => read_idx += 3,
             CharClass::Byte4 => read_idx += 4,
             CharClass::Lower | CharClass::Upper | CharClass::C3Prefix | CharClass::Number => break 'finder read_idx,
-            _ => break 'finder read_idx,
+            // _ => break 'finder read_idx,
         }
     };
 
@@ -475,59 +475,131 @@ fn get_next_word(src: &mut [u8], cursor: &mut usize) -> Option<(usize, usize, bo
     // ---------------------------------------------------------
     // PHASE 3: SCAN & NORMALIZE
     // ---------------------------------------------------------
+    // while read_idx < len {
+    //     let b = src[read_idx];
+    //     match GET_CHAR_TYPE[b as usize] {
+    //         CharClass::Lower | CharClass::Number => {
+    //             src[write_idx] = b;
+    //             write_idx += 1;
+    //             read_idx += 1;
+    //         }
+    //         CharClass::Upper => {
+    //             src[write_idx] = b | 0x20;
+    //             write_idx += 1;
+    //             read_idx += 1;
+    //         }
+    //         CharClass::C3Prefix => {
+    //             if read_idx + 1 < len {
+    //                 let next = &mut src[read_idx + 1];
+    //                 *next = match *next {
+    //                     0x8B | 0x87 | 0xAB | 0xA7 => *next | 0x20,
+    //                     _ => *next,
+    //                 };
+    //                 write_idx += 2;
+    //                 read_idx += 2;
+    //             } else {
+    //                 read_idx += 1; // Skip broken byte
+    //                 break;
+    //             }
+    //         }
+    //         CharClass::CCPrefix => {
+    //             // BACKTRACKING NFD FIX
+    //             if read_idx + 1 < len {
+    //                 let comb = src[read_idx + 1];
+    //                 if write_idx > word_start {
+    //                     let prev = src[write_idx - 1];
+    //                     if prev == b'e' && comb == 0x88 {
+    //                         src[write_idx - 1] = 0xC3; // e -> ë (part 1)
+    //                         src[write_idx] = 0xAB; // ë (part 2)
+    //                         write_idx += 1; // Net change: 1 byte became 2
+    //                     } else if prev == b'c' && comb == 0xA7 {
+    //                         src[write_idx - 1] = 0xC3; // c -> ç
+    //                         src[write_idx] = 0xA7;
+    //                         write_idx += 1;
+    //                     }
+    //                     // If no match, we just don't increment write_idx (strips the CC byte)
+    //                 }
+    //                 read_idx += 2;
+    //             } else {
+    //                 read_idx += 1;
+    //                 break;
+    //             }
+    //         }
+    //         _ => break, // Delimiters, and numbers
+    //     }
+    // ---------------------------------------------------------
+    // PHASE 3: SCAN & NORMALIZE (OPTIMIZED)
+    // ---------------------------------------------------------
+    // SAFETY: We checked `read_idx < len` at the start of the loop.
+    // We also know `write_idx <= read_idx` is an invariant.
+    // Therefore, all access is within bounds.
+    let src_ptr = src.as_mut_ptr();
+
     while read_idx < len {
-        let b = src[read_idx];
-        match GET_CHAR_TYPE[b as usize] {
-            CharClass::Lower | CharClass::Number => {
-                src[write_idx] = b;
-                write_idx += 1;
-                read_idx += 1;
-            }
-            CharClass::Upper => {
-                src[write_idx] = b | 0x20;
-                write_idx += 1;
-                read_idx += 1;
-            }
-            CharClass::C3Prefix => {
-                if read_idx + 1 < len {
-                    let next = &mut src[read_idx + 1];
-                    *next = match *next {
-                        0x8B | 0x87 | 0xAB | 0xA7 => *next | 0x20,
-                        _ => *next,
-                    };
-                    write_idx += 2;
-                    read_idx += 2;
-                } else {
-                    read_idx += 1; // Skip broken byte
-                    break;
-                }
-            }
-            CharClass::CCPrefix => {
-                // BACKTRACKING NFD FIX
-                if read_idx + 1 < len {
-                    let comb = src[read_idx + 1];
-                    if write_idx > word_start {
-                        let prev = src[write_idx - 1];
-                        if prev == b'e' && comb == 0x88 {
-                            src[write_idx - 1] = 0xC3; // e -> ë (part 1)
-                            src[write_idx] = 0xAB; // ë (part 2)
-                            write_idx += 1; // Net change: 1 byte became 2
-                        } else if prev == b'c' && comb == 0xA7 {
-                            src[write_idx - 1] = 0xC3; // c -> ç
-                            src[write_idx] = 0xA7;
-                            write_idx += 1;
-                        }
-                        // If no match, we just don't increment write_idx (strips the CC byte)
-                    }
-                    read_idx += 2;
-                } else {
+        unsafe {
+            // 1. Read without bounds check
+            let b = *src_ptr.add(read_idx);
+
+            match GET_CHAR_TYPE[b as usize] {
+
+                CharClass::Upper | CharClass::Lower => {
+                    *src_ptr.add(write_idx) = b | 0x20;
+                    write_idx += 1;
                     read_idx += 1;
-                    break;
                 }
+                CharClass::C3Prefix => {
+                    // Manual bounds check for the +1 lookahead
+                    if read_idx + 1 < len {
+                        let next_ptr = src_ptr.add(read_idx + 1);
+                        let mut next_val = *next_ptr;
+
+                        // Branchless optimization for the bitwise OR
+                        // (Assuming these specific bytes need 0x20 flag)
+                        if matches!(next_val, 0x8B | 0x87 | 0xAB | 0xA7) {
+                            next_val |= 0x20;
+                            *next_ptr = next_val;
+                        }
+
+                        write_idx += 2;
+                        read_idx += 2;
+                    } else {
+                        read_idx += 1;
+                        break;
+                    }
+                }
+
+                CharClass::CCPrefix => {
+                    // BACKTRACKING NFD FIX
+                    if read_idx + 1 < len {
+                        let comb = *src_ptr.add(read_idx + 1);
+
+                        // We only write IF we find a match, otherwise we skip.
+                        // This logic is tricky, keeping your original flow but unsafe:
+                        if write_idx > word_start {
+                            let prev_ptr = src_ptr.add(write_idx - 1);
+                            let prev = *prev_ptr;
+
+                            if prev == b'e' && comb == 0x88 {
+                                *prev_ptr = 0xC3;
+                                *src_ptr.add(write_idx) = 0xAB;
+                                write_idx += 1;
+                            } else if prev == b'c' && comb == 0xA7 {
+                                *prev_ptr = 0xC3;
+                                *src_ptr.add(write_idx) = 0xA7;
+                                write_idx += 1;
+                            }
+                        }
+                        read_idx += 2;
+                    } else {
+                        read_idx += 1;
+                        break;
+                    }
+                }
+
+                _ => break,
             }
-            _ => break, // Delimiters, and numbers
         }
-    }
+    } // }
 
     *cursor = read_idx;
     Some((word_start, write_idx, false))
