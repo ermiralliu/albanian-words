@@ -191,13 +191,11 @@ fn get_next_word(src: &mut [u8], cursor: &mut usize) -> Option<(usize, usize, bo
     // ---------------------------------------------------------
     // PHASE 1: FIND WORD START
     // ---------------------------------------------------------
-    let word_start = src
+    let word_offset = src
         .iter()
-        .enumerate()
         .skip(read_idx) // tbh we kinda need to check this cursor stuff, cause there's probably a better way
-        .find(|&(_, &b)| FIRST_PASS[b as usize])
-        .map(|(i, _)| i)?;
-
+        .position(|&b| FIRST_PASS[b as usize])?; // position is after skip, so it's relative, we need to sum with the initial part
+    let word_start = read_idx + word_offset;
 
     let mut write_idx = word_start;
     read_idx = word_start;
