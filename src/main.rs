@@ -2,7 +2,12 @@ pub mod alb_parser;
 pub mod file_readers;
 pub mod stop_words;
 use std::{
-    collections::{HashMap, HashSet}, fmt::write, sync::Mutex, thread, time::Instant, vec
+    collections::{HashMap, HashSet},
+    fmt::write,
+    sync::Mutex,
+    thread,
+    time::Instant,
+    vec,
 };
 
 use alb_parser::AlbanianParser;
@@ -126,7 +131,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                     let mut article_tokens = Vec::new();
                     let mut cursor = 0;
 
-                    while let Some((start, end, is_num)) = next_word_inplace(&mut local_buf, &mut cursor) {
+                    while let Some((start, end, is_num)) = get_next_word(&mut local_buf, &mut cursor) {
                         if end - start < 2 {
                             continue;
                         }
@@ -135,6 +140,10 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                         }
 
                         let word = &local_buf[start..end];
+                        #[cfg(debug_assertions)]
+                        {
+                            print!("{}, ", unsafe { str::from_utf8_unchecked(word)});
+                        }
                         if stop_words.contains(word) {
                             continue;
                         }
@@ -422,135 +431,109 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
 fn get_next_word(src: &mut [u8], cursor: &mut usize) -> Option<(usize, usize, bool)> {
     let len = src.len();
+    let mut read_idx = *cursor;
 
     // ---------------------------------------------------------
     // PHASE 1: FIND WORD START
-    // Fast-forward through delimiters and trash bytes
     // ---------------------------------------------------------
-    let mut cur = *cursor; // we don't use it directly from here, so we don't have to
-                              // dereference and stuff
     let word_start = 'finder: loop {
-        // I guess it's cleaner this way. Ugh.
-        if cur >= len {
+        if read_idx >= len {
             return None;
         }
-        // Direct table lookup to skip jump tables/branches
-        match GET_CHAR_TYPE[src[*cursor] as usize] {
-            CharClass::Other | CharClass::StillNumber => cur += 1,
-            CharClass::CCPrefix => cur += 2,
-            CharClass::Byte3 => cur += 3,
-            CharClass::Byte4 => cur += 4,
-            // Valid start: Lower, Upper, Number, C3Prefix
-            _ => break 'finder cur,
+        match GET_CHAR_TYPE[src[read_idx] as usize] {
+            CharClass::Other | CharClass::StillNumber => read_idx += 1,
+            CharClass::CCPrefix => read_idx += 2,
+            CharClass::Byte3 => read_idx += 3,
+            CharClass::Byte4 => read_idx += 4,
+            _ => break 'finder read_idx,
         }
     };
 
     let mut write_idx = word_start;
+    read_idx = word_start;
+
     // ---------------------------------------------------------
-    // PHASE 2: NUMERIC LOOP (Optional)
-    // Only enters if word starts with a number.
+    // PHASE 2: NUMERIC LOOP
     // ---------------------------------------------------------
     if let CharClass::Number = GET_CHAR_TYPE[src[word_start] as usize] {
-        while write_idx < len {
-            let b = src[write_idx];
+        while read_idx < len {
+            let b = src[read_idx];
             match GET_CHAR_TYPE[b as usize] {
-                // Pure Numeric Characters
-                CharClass::Number | CharClass::StillNumber => write_idx += 1,
-                // Delimiters -> End of valid Number
+                CharClass::Number | CharClass::StillNumber => read_idx += 1,
                 class => {
                     let skip = match class {
                         CharClass::Byte3 => 3,
                         CharClass::Byte4 => 4,
                         CharClass::CCPrefix => 2,
-                        _ => 0, // Other/Upper/Lower: don't skip, next call handles them
+                        _ => 0,
                     };
-                    *cursor = write_idx + skip;
-                    return Some((word_start, write_idx, true)); // write_idx is non-inclusive
+                    *cursor = read_idx + skip;
+                    // In pure numeric mode, write_idx and read_idx are the same
+                    return Some((word_start, read_idx, true));
                 }
             }
         }
-
-        // If we reached EOF in numeric mode
-        if write_idx >= len {
-            *cursor = write_idx;
-            return Some((word_start, write_idx, true));
-        }
+        *cursor = read_idx;
+        return Some((word_start, read_idx, true));
     }
 
     // ---------------------------------------------------------
     // PHASE 3: SCAN & NORMALIZE
     // ---------------------------------------------------------
-
-    while write_idx < len {
-        let b = src[write_idx];
-
+    while read_idx < len {
+        let b = src[read_idx];
         match GET_CHAR_TYPE[b as usize] {
-            CharClass::Lower => {
+            CharClass::Lower | CharClass::Number => {
+                src[write_idx] = b;
                 write_idx += 1;
+                read_idx += 1;
             }
             CharClass::Upper => {
                 src[write_idx] = b | 0x20;
                 write_idx += 1;
-            }
-            CharClass::Number => {
-                // Fix this part. We're supposed to break and return here
-                write_idx += 1;
-                // is_numeric status is preserved (starts true -> stays true)
+                read_idx += 1;
             }
             CharClass::C3Prefix => {
-                // Handle Albanian NFC (Ë/Ç)
-                if write_idx + 1 < len {
-                    let next = src[*cursor + 1];
-                    src[write_idx] = 0xC3;
-                    // Normalize Upper Albanian to Lower:
-                    // 0x8B(Ë)->0xAB(ë), 0x87(Ç)->0xA7(ç)
-                    match next {
-                        0x8B | 0x87 | 0xAB | 0xA7 => src[write_idx + 1] = next | 0x20,
-                        _ => src[write_idx + 1] = next,
-                    }
+                if read_idx + 1 < len {
+                    let next = &mut src[read_idx + 1];
+                    *next = match *next {
+                        0x8B | 0x87 | 0xAB | 0xA7 => *next | 0x20,
+                        _ => *next,
+                    };
                     write_idx += 2;
+                    read_idx += 2;
                 } else {
-                    write_idx += 1; // Broken UTF-8 at EOF
+                    read_idx += 1; // Skip broken byte
                     break;
                 }
             }
             CharClass::CCPrefix => {
                 // BACKTRACKING NFD FIX
-                // We hit a combining char (0xCC). Check if we can merge it with the PREVIOUS char.
-                if write_idx + 1 < len {
-                    let comb = src[*cursor + 1];
-
-                    // Safety: We can only merge if we actually wrote a char previously in this word
+                if read_idx + 1 < len {
+                    let comb = src[read_idx + 1];
                     if write_idx > word_start {
                         let prev = src[write_idx - 1];
-
-                        // Check for 'e' + diaeresis (0x88) OR 'c' + cedilla (0xA7)
-                        // Note: prev is already lowercased by previous iterations
                         if prev == b'e' && comb == 0x88 {
-                            // Merge: e (1 byte) + CC 88 (2 bytes) -> ë (2 bytes: C3 AB)
-                            // We overwrite the 'e' at [write_idx-1]
-                            src[write_idx - 1] = 0xC3;
-                            src[write_idx] = 0xAB;
-                            write_idx += 1; // We added net +1 byte length (1 -> 2)
+                            src[write_idx - 1] = 0xC3; // e -> ë (part 1)
+                            src[write_idx] = 0xAB; // ë (part 2)
+                            write_idx += 1; // Net change: 1 byte became 2
                         } else if prev == b'c' && comb == 0xA7 {
-                            // Merge: c + CC A7 -> ç (C3 A7)
-                            src[write_idx - 1] = 0xC3;
+                            src[write_idx - 1] = 0xC3; // c -> ç
                             src[write_idx] = 0xA7;
                             write_idx += 1;
                         }
-                        // Else: It's a "pointless" individual diacritic.
-                        // We do nothing to write_idx (effectively stripping it).
+                        // If no match, we just don't increment write_idx (strips the CC byte)
                     }
-                    write_idx += 2; // Always consume the 2-byte combining char
+                    read_idx += 2;
                 } else {
-                    write_idx += 2;
+                    read_idx += 1;
                     break;
                 }
             }
-            // Delimiters (Other, Byte3, Byte4, StillNumber)
-            _ => break,
+            _ => break, // Delimiters, and numbers
         }
     }
-    *cursor = write_idx;
+
+    *cursor = read_idx;
     Some((word_start, write_idx, false))
 }
