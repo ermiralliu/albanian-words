@@ -10,3 +10,5 @@ my_app_run.data.third
 *.data
 *.data.old
 *.annotation
+
+config.ini
