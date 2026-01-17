@@ -35,19 +35,19 @@ pub enum CharClass {
               // E2Prefix = 6,  // 0xE2 (Smart quotes)
               // Foreign = 7,   // Everything else (ö, ü, Chinese, etc.)
 } // I'm giving up on the hyphen
-  
+
 const FIRST_PASS: [bool; 256] = {
     let mut init = [false; 256];
     let mut i: u8 = 0;
 
     loop {
-        if matches!(i, b'0'..=b'9' | b'A'..= b'Z'| b'a'..=b'z'| 0xC2) {
+        if matches!(i, b'0'..=b'9' | b'A'..= b'Z'| b'a'..=b'z'| 0xC3) {
             init[i as usize] = true;
         }
         if i == 255 {
             break;
         }
-        i+=1;
+        i += 1;
     }
     init
 };
@@ -184,262 +184,6 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     Ok(())
 }
 
-// fn next_word_inplace(src: &mut [u8], cursor: &mut usize) -> Option<(usize, usize, bool)> {
-//     let len = src.len();
-//
-//     // 1. Skip leading delimiters (including the 3-byte ones)
-//     while *cursor < len {
-//         let b = src[*cursor];
-//
-//         // Handle ASCII delimiters
-//         if WORD_DELIMITER_BITSET[b as usize] {
-//             *cursor += 1;
-//             continue;
-//         }
-//
-//         // Handle 3-byte delimiters at the start
-//         if b == 0xE2 && *cursor + 2 < len && src[*cursor + 1] == 0x80 {
-//             let third = src[*cursor + 2];
-//             if third == 0x9C || third == 0x9D || third == 0x93 || third == 0x98 || third == 0x99 {
-//                 *cursor += 3;
-//                 continue;
-//             }
-//         }
-//
-//         break; // Found a non-delimiter byte
-//     }
-//
-//     if *cursor >= len {
-//         return None;
-//     }
-//
-//     let word_start = *cursor;
-//     let mut write_idx = *cursor;
-//     let mut is_numeric = true;
-//
-//     // 2. Scan and transform
-//     while *cursor < len {
-//         let b = src[*cursor];
-//
-//         // ASCII Delimiter check
-//         if WORD_DELIMITERS.contains(&b) {
-//             // We do NOT increment cursor here; the next call's "skip" logic handles it
-//             break;
-//         }
-//
-//         match b {
-//             // Rule 1: NFC Normalization (3 -> 2 bytes)
-//             0x65 | 0x45 if *cursor + 2 < len && src[*cursor + 1] == 0xCC && src[*cursor + 2] == 0x88 => {
-//                 src[write_idx] = 0xC3;
-//                 src[write_idx + 1] = 0xAB;
-//                 write_idx += 2;
-//                 *cursor += 3;
-//                 is_numeric = false;
-//             }
-//
-//             // Rule 2: ASCII Lowercase
-//             b'A'..=b'Z' => {
-//                 src[write_idx] = b + 32;
-//                 write_idx += 1;
-//                 *cursor += 1;
-//                 is_numeric = false;
-//             }
-//
-//             // Rule 3: Albanian Ë/Ç
-//             0xC3 if *cursor + 1 < len => {
-//                 let next = src[*cursor + 1];
-//                 src[write_idx] = 0xC3;
-//                 match next {
-//                     0x8B | 0xAB => src[write_idx + 1] = 0xAB,
-//                     0x87 | 0xA7 => src[write_idx + 1] = 0xA7,
-//                     _ => src[write_idx + 1] = next,
-//                 }
-//                 write_idx += 2;
-//                 *cursor += 2;
-//                 is_numeric = false;
-//             }
-//
-//             // Rule 4: 3-byte Delimiters (The "Stuck" fix)
-//             0xE2 if *cursor + 2 < len && src[*cursor + 1] == 0x80 => {
-//                 let third = src[*cursor + 2];
-//                 if third == 0x9C || third == 0x9D || third == 0x93 || third == 0x98 || third == 0x99 {
-//                     // Stop word here. We don't increment cursor; the skip logic above will jump 3.
-//                     break;
-//                 } else {
-//                     src[write_idx] = b;
-//                     write_idx += 1;
-//                     *cursor += 1;
-//                     is_numeric = false;
-//                 }
-//             }
-//
-//             // Rule 5: Standard scan
-//             _ => {
-//                 if is_numeric && !b.is_ascii_digit() && b != b'.' && b != b'-' {
-//                     is_numeric = false;
-//                 }
-//                 if write_idx != *cursor {
-//                     src[write_idx] = b;
-//                 }
-//                 write_idx += 1;
-//                 *cursor += 1;
-//             }
-//         }
-//     }
-//
-//     if is_numeric && (write_idx == word_start || is_edge_case_not_number(&src[word_start..write_idx])) {
-//         is_numeric = false;
-//     }
-//
-//     Some((word_start, write_idx, is_numeric))
-// }
-
-// #[inline(always)]
-// fn is_edge_case_not_number(s: &[u8]) -> bool {
-//     s == b"." || s == b"-" || s == b".."
-// }
-
-// fn get_next_word(src: &mut [u8], cursor: &mut usize) -> Option<(usize, usize, bool)> {
-//     let len = src.len();
-//     let mut is_foreign = false;
-//     let mut is_number = false;
-//
-//     let word_start = {
-//         let start = *cursor;
-//         while *cursor < len {
-//             let b = &src[*cursor];
-//
-//             match GET_CHAR_TYPE[*b as usize] {
-//                 CharClass::Lower => {
-//                     start = *cursor;
-//                     *cursor+=1;
-//                     break;
-//                 },
-//                 CharClass::Upper => {
-//                     *b = *b | 0x20;
-//                     start = *cursor;
-//                     *cursor+=1;
-//                     break;
-//                 },
-//                 CharClass::Other | CharClass::StillNumber => *cursor += 1,
-//                 CharClass::C3Prefix => {
-//                     let next_char = &src[*cursor + 1];
-//                     match next_char {
-//                         0x8B | 0x87 | 0xAB | 0xA7 => {
-//                             // lowercase these
-//                             *next_char = *next_char | 0x20;
-//                         },
-//                         _ => {
-//                             is_foreign = true;
-//                         }
-//                     }
-//                     start = *cursor;
-//                     *cursor += 2;
-//                     break;
-//                 },
-//                 CharClass::Number => {
-//                    is_number = true;
-//                    start = *cursor;
-//                    *cursor += 1;
-//                    break;
-//                 },
-//                 CharClass::CCPrefix => *cursor += 2, // skips pointless diaeresis and cedilla
-//                 CharClass::Byte3 => *cursor += 3,
-//                 CharClass::Byte4 => *cursor += 4,
-//                 _ => unreachable!("Every edge case is caught by Other"),
-//             }
-//         }
-//         start
-//     };
-//
-//     if *cursor >= len {
-//         return None;
-//     }
-//     // This lower part is what I want to fix.
-//
-//     let word_end = {
-//         let mut write_idx = *cursor;
-//
-//         // 2. Scan and transform
-//         while *cursor < len {
-//             let b = src[*cursor];
-//
-//             // ASCII Delimiter check
-//             if WORD_DELIMITERS.contains(&b) {
-//                 // We do NOT increment cursor here; the next call's "skip" logic handles it
-//                 break;
-//             }
-//
-//             match b {
-//                 // Rule 1: NFC Normalization (3 -> 2 bytes)
-//                 0x65 | 0x45 if *cursor + 2 < len && src[*cursor + 1] == 0xCC && src[*cursor + 2] == 0x88 => {
-//                     src[write_idx] = 0xC3;
-//                     src[write_idx + 1] = 0xAB;
-//                     write_idx += 2;
-//                     *cursor += 3;
-//                     is_numeric = false;
-//                 }
-//
-//                 // Rule 2: ASCII Lowercase
-//                 b'A'..=b'Z' => {
-//                     src[write_idx] = b + 32;
-//                     write_idx += 1;
-//                     *cursor += 1;
-//                     is_numeric = false;
-//                 }
-//
-//                 // Rule 3: Albanian Ë/Ç
-//                 0xC3 if *cursor + 1 < len => {
-//                     let next = src[*cursor + 1];
-//                     src[write_idx] = 0xC3;
-//                     match next {
-//                         0x8B | 0xAB => src[write_idx + 1] = 0xAB,
-//                         0x87 | 0xA7 => src[write_idx + 1] = 0xA7,
-//                         _ => src[write_idx + 1] = next,
-//                     }
-//                     write_idx += 2;
-//                     *cursor += 2;
-//                     is_numeric = false;
-//                 }
-//
-//                 // Rule 4: 3-byte Delimiters (The "Stuck" fix)
-//                 0xE2 if *cursor + 2 < len && src[*cursor + 1] == 0x80 => {
-//                     let third = src[*cursor + 2];
-//                     if third == 0x9C || third == 0x9D || third == 0x93 || third == 0x98 || third == 0x99 {
-//                         // Stop word here. We don't increment cursor; the skip logic above will jump 3.
-//                         break;
-//                     } else {
-//                         src[write_idx] = b;
-//                         write_idx += 1;
-//                         *cursor += 1;
-//                         is_numeric = false;
-//                     }
-//                 }
-//
-//                 // Rule 5: Standard scan
-//                 _ => {
-//                     if is_numeric && !b.is_ascii_digit() && b != b'.' && b != b'-' {
-//                         is_numeric = false;
-//                     }
-//                     if write_idx != *cursor {
-//                         src[write_idx] = b;
-//                     }
-//                     write_idx += 1;
-//                     *cursor += 1;
-//                 }
-//             }
-//         }
-//
-//         if is_numeric && (write_idx == word_start || is_edge_case_not_number(&src[word_start..write_idx])) {
-//             is_numeric = false;
-//         }
-//         write_idx
-//     };
-//
-//     Some((word_start, word_end, is_numeric))
-// }
-
-#[inline(always)]
 fn get_next_word(src: &mut [u8], cursor: &mut usize) -> Option<(usize, usize, bool)> {
     let len = src.len();
     let mut read_idx = *cursor;
@@ -447,19 +191,13 @@ fn get_next_word(src: &mut [u8], cursor: &mut usize) -> Option<(usize, usize, bo
     // ---------------------------------------------------------
     // PHASE 1: FIND WORD START
     // ---------------------------------------------------------
-    let word_start = 'finder: loop {
-        if read_idx >= len {
-            return None;
-        }
-        match GET_CHAR_TYPE[src[read_idx] as usize] {
-            CharClass::Other | CharClass::StillNumber => read_idx += 1,
-            CharClass::CCPrefix => read_idx += 2,
-            CharClass::Byte3 => read_idx += 3,
-            CharClass::Byte4 => read_idx += 4,
-            CharClass::Lower | CharClass::Upper | CharClass::C3Prefix | CharClass::Number => break 'finder read_idx,
-            // _ => break 'finder read_idx,
-        }
-    };
+    let word_start = src
+        .iter()
+        .enumerate()
+        .skip(read_idx) // tbh we kinda need to check this cursor stuff, cause there's probably a better way
+        .find(|&(_, &b)| FIRST_PASS[b as usize])
+        .map(|(i, _)| i)?;
+
 
     let mut write_idx = word_start;
     read_idx = word_start;
