@@ -1,7 +1,11 @@
+#![feature(portable_simd)]
+
 pub mod alb_parser;
 pub mod file_readers;
 pub mod properties;
 pub mod stop_words;
+pub mod bitset;
+
 
 use std::{
     collections::{HashMap, HashSet},
@@ -16,6 +20,8 @@ use file_readers::seq_read;
 use properties::Properties;
 use std::env;
 use stop_words::STOP_WORDS;
+
+use crate::bitset::BITSET;
 
 #[derive(Copy, Clone, Debug, PartialEq)]
 #[repr(u8)]
@@ -194,7 +200,7 @@ fn get_next_word(src: &mut [u8], cursor: &mut usize) -> Option<(usize, usize, bo
     let word_offset = src
         .iter()
         .skip(read_idx) // tbh we kinda need to check this cursor stuff, cause there's probably a better way
-        .position(|&b| FIRST_PASS[b as usize])?; // position is after skip, so it's relative, we need to sum with the initial part
+        .position(|&b| BITSET.contains(b as usize))?; // position is after skip, so it's relative, we need to sum with the initial part
     let word_start = read_idx + word_offset;
 
     let mut write_idx = word_start;

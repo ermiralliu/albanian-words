@@ -1,0 +1,2 @@
+compile for standard x86 architecture
+RUSTFLAGS="-C target-feature=+avx2" cargo build --release
