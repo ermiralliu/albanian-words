@@ -147,18 +147,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                     let mut iterator = &mut local_buf[..].iter();
 
                     while let Some((word, is_num)) = get_next_word(&mut iterator) {
-                        if word.len() < 2 {
-                            continue;
-                        }
-                        if is_num {
-                            continue;
-                        }
-
-                        #[cfg(debug_assertions)]
-                        {
-                            print!("{}, ", unsafe { str::from_utf8_unchecked(word) });
-                        }
-                        if stop_words.contains(word) {
+                        if word.len() < 2 || is_num || stop_words.contains(word){
                             continue;
                         }
 
@@ -189,8 +178,6 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 }
 
 fn get_next_word<'a>(iterator: &'a mut std::slice::Iter<u8>) -> Option<(&'a [u8], bool)> {
-    // let len = src.len();
-    // let mut read_idx = *cursor;
     // ---------------------------------------------------------
     // PHASE 1: FIND WORD START
     // ---------------------------------------------------------
@@ -225,43 +212,23 @@ fn get_next_word<'a>(iterator: &'a mut std::slice::Iter<u8>) -> Option<(&'a [u8]
             }
         };
         return Some((sl, true));
-        // let start_ptr = word_start as *const u8
-        // let Some(word_end) =
-        //     iterator
-        //     .find(|&a| !matches!(GET_CHAR_TYPE[*a as usize], CharClass::Number | CharClass::StillNumber))
-        // else {
-        //     // We consumed the first character so it should be the size hint + 1, since [u8] slices
-        //     // show the right size left
-        //     let sl = unsafe { std::slice::from_raw_parts(start_ptr, size_hint + 1) };
-        //     return Some((sl, true));
-        // };
-        //
-        // let offset = unsafe { (word_end as *const u8).offset_from(start_ptr) as usize };
-        // // We subtract offset by one, cause it has consumed one char more than needed in the end
-        // let sl = unsafe { std::slice::from_raw_parts(start_ptr, offset - 1) };
     }
 
     // ---------------------------------------------------------
     // PHASE 3: SCAN & NORMALIZE (OPTIMIZED)
     // ---------------------------------------------------------
-    // SAFETY: We checked `read_idx < len` at the start of the loop.
-    // We also know `write_idx <= read_idx` is an invariant.
-    // Therefore, all access is within bounds.
-    // 1. Initialize the write pointer at the word_start address
     if GET_CHAR_TYPE[*word_start as usize] == CharClass::Upper {
+        #[allow(unused_variables)]
         let mut assign = start_ptr as *mut u8;
-        let init_val = unsafe{ *assign };
-        unsafe{
-            *assign = init_val | 0x20
-        };
+        let init_val = unsafe { *assign };
+        unsafe { *assign = init_val | 0x20 };
     }
 
-    #[cfg(debug_assertions)]
-    {
-        unsafe { dbg!(*start_ptr as char) };
-    }
-    let mut write_ptr = start_ptr as *mut u8;
-
+    // #[cfg(debug_assertions)]
+    // {
+    //     unsafe { dbg!(*start_ptr as char) };
+    // }
+    let mut write_ptr = unsafe { (start_ptr as *mut u8).add(1) };
 
     // 2. The iterator should already be positioned AFTER word_start
     // (Assuming 'iterator' was created from the slice following word_start)
@@ -328,7 +295,13 @@ fn get_next_word<'a>(iterator: &'a mut std::slice::Iter<u8>) -> Option<(&'a [u8]
     let final_write_ptr = write_ptr;
     let final_len = unsafe { final_write_ptr.offset_from(start_ptr) as usize };
     let sl = unsafe { std::slice::from_raw_parts(start_ptr, final_len) };
-
+    #[cfg(debug_assertions)]
+    {
+        unsafe {
+            dbg!(std::str::from_utf8_unchecked(sl));
+            // dbg!(*start_ptr as char);
+        }
+    }
     // Return the newly created slice
     Some((sl, false))
 }
