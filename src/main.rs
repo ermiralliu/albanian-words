@@ -1,11 +1,10 @@
 // #![feature(portable_simd)]
 
 pub mod alb_parser;
+pub mod bitset;
 pub mod file_readers;
 pub mod properties;
 pub mod stop_words;
-pub mod bitset;
-
 
 use std::{
     collections::{HashMap, HashSet},
@@ -42,21 +41,21 @@ pub enum CharClass {
               // Foreign = 7,   // Everything else (ö, ü, Chinese, etc.)
 } // I'm giving up on the hyphen
 
-const FIRST_PASS: [bool; 256] = {
-    let mut init = [false; 256];
-    let mut i: u8 = 0;
-
-    loop {
-        if matches!(i, b'0'..=b'9' | b'A'..= b'Z'| b'a'..=b'z'| 0xC3) {
-            init[i as usize] = true;
-        }
-        if i == 255 {
-            break;
-        }
-        i += 1;
-    }
-    init
-};
+// const FIRST_PASS: [bool; 256] = {
+//     let mut init = [false; 256];
+//     let mut i: u8 = 0;
+//
+//     loop {
+//         if matches!(i, b'0'..=b'9' | b'A'..= b'Z'| b'a'..=b'z'| 0xC3) {
+//             init[i as usize] = true;
+//         }
+//         if i == 255 {
+//             break;
+//         }
+//         i += 1;
+//     }
+//     init
+// };
 
 const GET_CHAR_TYPE: [CharClass; 256] = {
     let mut init = [CharClass::Other; 256];
@@ -145,17 +144,16 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                     }
 
                     let mut article_tokens = Vec::new();
-                    let mut cursor = 0;
+                    let mut iterator = &mut local_buf[..].iter();
 
-                    while let Some((start, end, is_num)) = get_next_word(&mut local_buf, &mut cursor) {
-                        if end - start < 2 {
+                    while let Some((word, is_num)) = get_next_word(&mut iterator) {
+                        if word.len() < 2 {
                             continue;
                         }
                         if is_num {
                             continue;
                         }
 
-                        let word = &local_buf[start..end];
                         #[cfg(debug_assertions)]
                         {
                             print!("{}, ", unsafe { str::from_utf8_unchecked(word) });
@@ -190,45 +188,57 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     Ok(())
 }
 
-fn get_next_word(src: &mut [u8], cursor: &mut usize) -> Option<(usize, usize, bool)> {
-    let len = src.len();
-    let mut read_idx = *cursor;
-
+fn get_next_word<'a>(iterator: &'a mut std::slice::Iter<u8>) -> Option<(&'a [u8], bool)> {
+    // let len = src.len();
+    // let mut read_idx = *cursor;
     // ---------------------------------------------------------
     // PHASE 1: FIND WORD START
     // ---------------------------------------------------------
-    let word_offset = src
-        .iter()
-        .skip(read_idx) // tbh we kinda need to check this cursor stuff, cause there's probably a better way
-        .position(|&b| BITSET.contains(b as usize))?; // position is after skip, so it's relative, we need to sum with the initial part
-    let word_start = read_idx + word_offset;
-
-    let mut write_idx = word_start;
-    read_idx = word_start;
+    let word_start = iterator // the return is actually a ptr/reference, so we're actually good
+        .find(|&b| BITSET.contains(*b as usize))?; // position is after skip, so it's relative, we need to sum with the initial part
+    let size_hint = iterator.len();
+    let start_ptr = word_start as *const u8;
 
     // ---------------------------------------------------------
     // PHASE 2: NUMERIC LOOP
     // ---------------------------------------------------------
-    if let CharClass::Number = GET_CHAR_TYPE[src[word_start] as usize] {
-        while read_idx < len {
-            let b = src[read_idx];
-            match GET_CHAR_TYPE[b as usize] {
-                CharClass::Number | CharClass::StillNumber => read_idx += 1,
-                class => {
-                    let skip = match class {
-                        CharClass::Byte3 => 3,
-                        CharClass::Byte4 => 4,
-                        CharClass::CCPrefix => 2,
-                        _ => 0,
-                    };
-                    *cursor = read_idx + skip;
-                    // In pure numeric mode, write_idx and read_idx are the same
-                    return Some((word_start, read_idx, true));
-                }
+    if let CharClass::Number = GET_CHAR_TYPE[*word_start as usize] {
+        let mut peekable = iterator.peekable();
+        while peekable
+            .next_if(|&a| matches!(GET_CHAR_TYPE[*a as usize], CharClass::Number | CharClass::StillNumber))
+            .is_some()
+        {}
+
+        // 3. Determine the end point
+        // We use peek() to get the address of the NEXT character without consuming it
+        let sl = match peekable.peek() {
+            Some(&next_char_ref) => {
+                // We found a non-number. The slice ends at this character's address.
+                let end_ptr = *next_char_ref as *const u8;
+                let offset = unsafe { end_ptr.offset_from(start_ptr) as usize };
+                unsafe { std::slice::from_raw_parts(start_ptr, offset) }
             }
-        }
-        *cursor = read_idx;
-        return Some((word_start, read_idx, true));
+            None => {
+                // We hit the end of the iterator.
+                // We use the size_hint logic or the original remaining length.
+                unsafe { std::slice::from_raw_parts(start_ptr, size_hint + 1) }
+            }
+        };
+        return Some((sl, true));
+        // let start_ptr = word_start as *const u8
+        // let Some(word_end) =
+        //     iterator
+        //     .find(|&a| !matches!(GET_CHAR_TYPE[*a as usize], CharClass::Number | CharClass::StillNumber))
+        // else {
+        //     // We consumed the first character so it should be the size hint + 1, since [u8] slices
+        //     // show the right size left
+        //     let sl = unsafe { std::slice::from_raw_parts(start_ptr, size_hint + 1) };
+        //     return Some((sl, true));
+        // };
+        //
+        // let offset = unsafe { (word_end as *const u8).offset_from(start_ptr) as usize };
+        // // We subtract offset by one, cause it has consumed one char more than needed in the end
+        // let sl = unsafe { std::slice::from_raw_parts(start_ptr, offset - 1) };
     }
 
     // ---------------------------------------------------------
@@ -237,74 +247,207 @@ fn get_next_word(src: &mut [u8], cursor: &mut usize) -> Option<(usize, usize, bo
     // SAFETY: We checked `read_idx < len` at the start of the loop.
     // We also know `write_idx <= read_idx` is an invariant.
     // Therefore, all access is within bounds.
-    let src_ptr = src.as_mut_ptr();
+    // 1. Initialize the write pointer at the word_start address
+    if GET_CHAR_TYPE[*word_start as usize] == CharClass::Upper {
+        let mut assign = start_ptr as *mut u8;
+        let init_val = unsafe{ *assign };
+        unsafe{
+            *assign = init_val | 0x20
+        };
+    }
 
-    while read_idx < len {
-        unsafe {
-            // 1. Read without bounds check
-            let b = *src_ptr.add(read_idx);
+    #[cfg(debug_assertions)]
+    {
+        unsafe { dbg!(*start_ptr as char) };
+    }
+    let mut write_ptr = start_ptr as *mut u8;
 
-            match GET_CHAR_TYPE[b as usize] {
-                CharClass::Upper | CharClass::Lower => {
-                    *src_ptr.add(write_idx) = b | 0x20;
-                    write_idx += 1;
-                    read_idx += 1;
-                }
-                CharClass::C3Prefix => {
-                    // Manual bounds check for the +1 lookahead
-                    if read_idx + 1 < len {
-                        let next_ptr = src_ptr.add(read_idx + 1);
-                        let mut next_val = *next_ptr;
 
-                        // Branchless optimization for the bitwise OR
-                        // (Assuming these specific bytes need 0x20 flag)
-                        if matches!(next_val, 0x8B | 0x87 | 0xAB | 0xA7) {
-                            next_val |= 0x20;
-                        }
-                        *src_ptr.add(write_idx) = b;
-                        *src_ptr.add(write_idx + 1) = next_val;
+    // 2. The iterator should already be positioned AFTER word_start
+    // (Assuming 'iterator' was created from the slice following word_start)
+    let mut peekable = iterator.peekable();
 
-                        write_idx += 2;
-                        read_idx += 2;
-                    } else {
-                        read_idx += 1;
-                        break;
+    while let Some(&b) = peekable.next() {
+        match GET_CHAR_TYPE[b as usize] {
+            CharClass::Upper | CharClass::Lower => unsafe {
+                *write_ptr = b | 0x20;
+                write_ptr = write_ptr.add(1);
+            },
+
+            CharClass::C3Prefix => {
+                if let Some(&&next_val) = peekable.peek() {
+                    let mut next_v = next_val;
+                    if matches!(next_v, 0x8b | 0x87 | 0xab | 0xa7) {
+                        next_v |= 0x20;
                     }
+                    unsafe {
+                        *write_ptr = b;
+                        *write_ptr.add(1) = next_v;
+                        write_ptr = write_ptr.add(2);
+                    }
+                    peekable.next(); // Consume the lookahead
+                } else {
+                    break;
                 }
+            }
 
-                CharClass::CCPrefix => {
-                    // BACKTRACKING NFD FIX
-                    if read_idx + 1 < len {
-                        let comb = *src_ptr.add(read_idx + 1);
-
-                        // We only write IF we find a match, otherwise we skip.
-                        // This logic is tricky, keeping your original flow but unsafe:
-                        if write_idx > word_start {
-                            let prev_ptr = src_ptr.add(write_idx - 1);
+            CharClass::CCPrefix => {
+                if let Some(&&comb) = peekable.peek() {
+                    // To backtrack, we look at what we just wrote
+                    unsafe {
+                        // Safety: Ensure we don't underflow before word_start
+                        if write_ptr > (word_start as *const u8 as *mut u8) {
+                            let prev_ptr = write_ptr.sub(1);
                             let prev = *prev_ptr;
 
                             if prev == b'e' && comb == 0x88 {
-                                *prev_ptr = 0xC3;
-                                *src_ptr.add(write_idx) = 0xAB;
-                                write_idx += 1;
-                            } else if prev == b'c' && comb == 0xA7 {
-                                *prev_ptr = 0xC3;
-                                *src_ptr.add(write_idx) = 0xA7;
-                                write_idx += 1;
+                                *prev_ptr = 0xc3;
+                                *write_ptr = 0xab;
+                                write_ptr = write_ptr.add(1);
+                                peekable.next();
+                            } else if prev == b'c' && comb == 0xa7 {
+                                *prev_ptr = 0xc3;
+                                *write_ptr = 0xa7;
+                                write_ptr = write_ptr.add(1);
+                                peekable.next();
+                            } else {
+                                // No match, but original logic skipped 2?
+                                peekable.next();
                             }
                         }
-                        read_idx += 2;
-                    } else {
-                        read_idx += 1;
-                        break;
                     }
+                } else {
+                    break;
                 }
-
-                _ => break,
             }
+            _ => break,
         }
     }
 
-    *cursor = read_idx;
-    Some((word_start, write_idx, false))
+    // To get your final write_idx equivalent (the end of the processed word):
+    let final_write_ptr = write_ptr;
+    let final_len = unsafe { final_write_ptr.offset_from(start_ptr) as usize };
+    let sl = unsafe { std::slice::from_raw_parts(start_ptr, final_len) };
+
+    // Return the newly created slice
+    Some((sl, false))
 }
+
+// fn get_next_word(src: &mut [u8], cursor: &mut usize) -> Option<(usize, usize, bool)> {
+//     let len = src.len();
+//     let mut read_idx = *cursor;
+//
+//     // ---------------------------------------------------------
+//     // PHASE 1: FIND WORD START
+//     // ---------------------------------------------------------
+//     let word_offset = src
+//         .iter()
+//         .skip(read_idx) // tbh we kinda need to check this cursor stuff, cause there's probably a better way
+//         .position(|&b| BITSET.contains(b as usize))?; // position is after skip, so it's relative, we need to sum with the initial part
+//     let word_start = read_idx + word_offset;
+//
+//     let mut write_idx = word_start;
+//     read_idx = word_start;
+//
+//     // ---------------------------------------------------------
+//     // PHASE 2: NUMERIC LOOP
+//     // ---------------------------------------------------------
+//     if let CharClass::Number = GET_CHAR_TYPE[src[word_start] as usize] {
+//         while read_idx < len {
+//             let b = src[read_idx];
+//             match GET_CHAR_TYPE[b as usize] {
+//                 CharClass::Number | CharClass::StillNumber => read_idx += 1,
+//                 class => {
+//                     let skip = match class {
+//                         CharClass::Byte3 => 3,
+//                         CharClass::Byte4 => 4,
+//                         CharClass::CCPrefix => 2,
+//                         _ => 0,
+//                     };
+//                     *cursor = read_idx + skip;
+//                     // In pure numeric mode, write_idx and read_idx are the same
+//                     return Some((word_start, read_idx, true));
+//                 }
+//             }
+//         }
+//         *cursor = read_idx;
+//         return Some((word_start, read_idx, true));
+//     }
+//
+//     // ---------------------------------------------------------
+//     // PHASE 3: SCAN & NORMALIZE (OPTIMIZED)
+//     // ---------------------------------------------------------
+//     // SAFETY: We checked `read_idx < len` at the start of the loop.
+//     // We also know `write_idx <= read_idx` is an invariant.
+//     // Therefore, all access is within bounds.
+//     let src_ptr = src.as_mut_ptr();
+//
+//     while read_idx < len {
+//         unsafe {
+//             // 1. Read without bounds check
+//             let b = *src_ptr.add(read_idx);
+//
+//             match GET_CHAR_TYPE[b as usize] {
+//                 CharClass::Upper | CharClass::Lower => {
+//                     *src_ptr.add(write_idx) = b | 0x20;
+//                     write_idx += 1;
+//                     read_idx += 1;
+//                 }
+//                 CharClass::C3Prefix => {
+//                     // Manual bounds check for the +1 lookahead
+//                     if read_idx + 1 < len {
+//                         let next_ptr = src_ptr.add(read_idx + 1);
+//                         let mut next_val = *next_ptr;
+//
+//                         // Branchless optimization for the bitwise OR
+//                         // (Assuming these specific bytes need 0x20 flag)
+//                         if matches!(next_val, 0x8B | 0x87 | 0xAB | 0xA7) {
+//                             next_val |= 0x20;
+//                         }
+//                         *src_ptr.add(write_idx) = b;
+//                         *src_ptr.add(write_idx + 1) = next_val;
+//
+//                         write_idx += 2;
+//                         read_idx += 2;
+//                     } else {
+//                         read_idx += 1;
+//                         break;
+//                     }
+//                 }
+//
+//                 CharClass::CCPrefix => {
+//                     // BACKTRACKING NFD FIX
+//                     if read_idx + 1 < len {
+//                         let comb = *src_ptr.add(read_idx + 1);
+//
+//                         // We only write IF we find a match, otherwise we skip.
+//                         // This logic is tricky, keeping your original flow but unsafe:
+//                         if write_idx > word_start {
+//                             let prev_ptr = src_ptr.add(write_idx - 1);
+//                             let prev = *prev_ptr;
+//
+//                             if prev == b'e' && comb == 0x88 {
+//                                 *prev_ptr = 0xC3;
+//                                 *src_ptr.add(write_idx) = 0xAB;
+//                                 write_idx += 1;
+//                             } else if prev == b'c' && comb == 0xA7 {
+//                                 *prev_ptr = 0xC3;
+//                                 *src_ptr.add(write_idx) = 0xA7;
+//                                 write_idx += 1;
+//                             }
+//                         }
+//                         read_idx += 2;
+//                     } else {
+//                         read_idx += 1;
+//                         break;
+//                     }
+//                 }
+//
+//                 _ => break,
+//             }
+//         }
+//     }
+//
+//     *cursor = read_idx;
+//     Some((word_start, write_idx, false))
+// }
