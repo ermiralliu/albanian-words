@@ -1,4 +1,4 @@
-use std::simd::prelude::*;
+// use std::simd::prelude::*;
 
 const ARR: [u64; 4] = [ // the printed bits need to be reversed for some reason
     0b0000000000000000000000000000000000000000000000001111111111000000u64.reverse_bits(),
@@ -7,10 +7,11 @@ const ARR: [u64; 4] = [ // the printed bits need to be reversed for some reason
     0b0001000000000000000000000000000000000000000000000000000000000000u64.reverse_bits(),
 ];
 
-pub const BITSET: Bitset256 = Bitset256(u64x4::from_array(ARR));
+pub const BITSET: Bitset256 = Bitset256(ARR);
 
 #[derive(Debug, Clone, Copy)]
-pub struct Bitset256(u64x4);
+pub struct Bitset256([u64;4]);
+// pub struct Bitset256(u64x4);
 
 impl Bitset256 {
     #[inline]
