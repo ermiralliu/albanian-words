@@ -15,12 +15,11 @@ use std::{
 };
 
 use alb_parser::AlbanianParser;
+use bitset::{FIRST_PASS, FirstPassType};
 use file_readers::seq_read;
 use properties::Properties;
 use std::env;
 use stop_words::STOP_WORDS;
-
-use crate::bitset::BITSET;
 
 #[derive(Copy, Clone, Debug, PartialEq)]
 #[repr(u8)]
@@ -144,10 +143,11 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                     }
 
                     let mut article_tokens = Vec::new();
-                    let mut iterator = &mut local_buf[..].iter();
+                    let mut iterator = &mut local_buf[0] as *mut u8;
+                    let end = unsafe { iterator.add(local_buf.len()) };
 
-                    while let Some((word, is_num)) = get_next_word(&mut iterator) {
-                        if word.len() < 2 || is_num || stop_words.contains(word){
+                    while let Some((word, is_num)) = get_next_word(&mut iterator, end) {
+                        if word.len() < 2 || is_num || stop_words.contains(word) {
                             continue;
                         }
 
@@ -177,133 +177,258 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     Ok(())
 }
 
-fn get_next_word<'a>(iterator: &'a mut std::slice::Iter<u8>) -> Option<(&'a [u8], bool)> {
+#[inline(always)]
+fn scan_while<F>(mut ptr: *mut u8, end: *mut u8, mut predicate: F) -> *mut u8
+where
+    F: FnMut(u8) -> bool,
+{
+    while ptr < end && predicate(unsafe { *ptr }) {
+        ptr = unsafe { ptr.add(1) };
+    }
+    ptr
+}
+
+fn get_next_word<'a>(itr_ref: &mut *mut u8, end: *mut u8) -> Option<(&'a [u8], bool)> {
     // ---------------------------------------------------------
     // PHASE 1: FIND WORD START
     // ---------------------------------------------------------
-    let word_start = iterator // the return is actually a ptr/reference, so we're actually good
-        .find(|&b| BITSET.contains(*b as usize))?; // position is after skip, so it's relative, we need to sum with the initial part
-    let size_hint = iterator.len();
-    let start_ptr = word_start as *const u8;
+    // let word_start = iterator // the return is actually a ptr/reference, so we're actually good
+    //     .find(|&b| BITSET.contains(*b as usize))?; // position is after skip, so it's relative, we need to sum with the initial part
+    // let size_hint = iterator.len();
+    // let start_ptr = word_start as *const u8;
+    let mut itr = *itr_ref;
+
+    let (token_type, start_ptr) = loop {
+        let ch = unsafe { *itr };
+        let res = FIRST_PASS.get_basic_type(ch as usize);
+
+        if res != FirstPassType::Skip {
+            break (res, itr);
+        }
+
+        itr = unsafe { itr.add(1) };
+        if itr == end {
+            return None;
+            // kur behet return None del nga loop, kshu qe ska nevoje te incr itr
+        } // Reached end of input
+    };
 
     // ---------------------------------------------------------
-    // PHASE 2: NUMERIC LOOP
+    // New Code
     // ---------------------------------------------------------
-    if let CharClass::Number = GET_CHAR_TYPE[*word_start as usize] {
-        let mut peekable = iterator.peekable();
-        while peekable
-            .next_if(|&a| matches!(GET_CHAR_TYPE[*a as usize], CharClass::Number | CharClass::StillNumber))
-            .is_some()
-        {}
+    match token_type {
+        FirstPassType::Skip => unreachable!("We have already returned if it was a Skip"),
+        FirstPassType::Number => {
+            // PHASE 2: SCAN NUMBERS
+            // Equivalent to your old next_if(Number | StillNumber)
+            itr = scan_while(itr, end, |b| {
+                matches!(GET_CHAR_TYPE[b as usize], CharClass::Number | CharClass::StillNumber)
+            });
 
-        // 3. Determine the end point
-        // We use peek() to get the address of the NEXT character without consuming it
-        let sl = match peekable.peek() {
-            Some(&next_char_ref) => {
-                // We found a non-number. The slice ends at this character's address.
-                let end_ptr = *next_char_ref as *const u8;
-                let offset = unsafe { end_ptr.offset_from(start_ptr) as usize };
-                unsafe { std::slice::from_raw_parts(start_ptr, offset) }
+            // Update the caller's iterator reference
+            *itr_ref = itr;
+
+            let len = unsafe { itr.offset_from(start_ptr) as usize };
+            let sl = unsafe { std::slice::from_raw_parts(start_ptr, len) };
+            Some((sl, true))
+        }
+        FirstPassType::Letter => {
+            // Since we're in-place, write_ptr starts at the same spot as start_ptr
+            // let mut write_ptr = start_ptr;
+
+                let move_one = unsafe { (*itr == 0xC3) as usize & (itr != end) as usize } as usize;
+                itr = unsafe { itr.add(move_one) };
+                unsafe { *itr |= 0x20 };
+                itr = unsafe { itr.add(1)};
+            // Handle the first character (already checked in Phase 1)
+            // let first_char = unsafe { *start_ptr };
+            // if GET_CHAR_TYPE[first_char as usize] == CharClass::Upper {
+            //     unsafe { *write_ptr = first_char | 0x20 };
+            // }
+            // write_ptr = unsafe { write_ptr.add(1) };
+
+            // itr was already incremented by 1 after the loop to point to the next char
+            while itr < end {
+                let b = unsafe { *itr };
+                match GET_CHAR_TYPE[b as usize] {
+                    CharClass::Upper | CharClass::Lower => unsafe {
+                        // *write_ptr = b | 0x20;
+                        // write_ptr = write_ptr.add(1);
+                        itr = itr.add(1);
+                    },
+
+                    CharClass::C3Prefix => unsafe {
+                        let next_ptr = itr.add(1);
+                        if next_ptr < end {
+                            *next_ptr |= 0x20;
+                                // next_v |= 0x20;
+                            // if matches!(next_v, 0x8b | 0x87 | 0xab | 0xa7) {
+                            // }
+                            // *write_ptr = b;
+                            // *write_ptr.add(1) = next_v;
+                            // write_ptr = write_ptr.add(2);
+                            itr = itr.add(2);
+                        } else {
+                            itr = itr.add(1); // Partial char at EOF
+                            break;
+                        }
+                    },
+
+                    CharClass::CCPrefix => unsafe {
+                        // let next_ptr = itr.add(1);
+                        itr = itr.add(1);
+                        // if next_ptr < end {
+                        //     let comb = *next_ptr;
+                        //     // Safety: write_ptr is always >= start_ptr.add(1) here
+                        //     let prev_ptr = write_ptr.sub(1);
+                        //     let prev = *prev_ptr;
+                        //
+                        //     if prev == b'e' && comb == 0x88 {
+                        //         *prev_ptr = 0xc3;
+                        //         *write_ptr = 0xab;
+                        //         write_ptr = write_ptr.add(1);
+                        //     } else if prev == b'c' && comb == 0xa7 {
+                        //         *prev_ptr = 0xc3;
+                        //         *write_ptr = 0xa7;
+                        //         write_ptr = write_ptr.add(1);
+                        //     } else {
+                        //         // No match, just consume (or TODO: handle 3-byte normalization)
+                        //     }
+                        //     itr = itr.add(2);
+                        // } else {
+                        //     itr = itr.add(1);
+                        //     break;
+                        // }
+                    },
+                    _ => break,
+                }
             }
-            None => {
-                // We hit the end of the iterator.
-                // We use the size_hint logic or the original remaining length.
-                unsafe { std::slice::from_raw_parts(start_ptr, size_hint + 1) }
-            }
-        };
-        return Some((sl, true));
+            *itr_ref = itr;
+            // The part below would normally use write_ptr, but I guess we return it normally from
+            // here + a flag.
+            let final_len = unsafe { itr.offset_from(start_ptr) as usize };
+            let sl = unsafe { std::slice::from_raw_parts(start_ptr, final_len) };
+            Some((sl, false))
+        }
     }
-
     // ---------------------------------------------------------
-    // PHASE 3: SCAN & NORMALIZE (OPTIMIZED)
+    // Old Code which I need to fit in the match above
     // ---------------------------------------------------------
-    if GET_CHAR_TYPE[*word_start as usize] == CharClass::Upper {
-        #[allow(unused_variables)]
-        let mut assign = start_ptr as *mut u8;
-        let init_val = unsafe { *assign };
-        unsafe { *assign = init_val | 0x20 };
-    }
-
+    // if let CharClass::Number = GET_CHAR_TYPE[*word_start as usize] {
+    //     let mut peekable = iterator.peekable();
+    //     while peekable
+    //         .next_if(|&a| matches!(GET_CHAR_TYPE[*a as usize], CharClass::Number | CharClass::StillNumber))
+    //         .is_some()
+    //     {}
+    //
+    //     // 3. Determine the end point
+    //     // We use peek() to get the address of the NEXT character without consuming it
+    //     let sl = match peekable.peek() {
+    //         Some(&next_char_ref) => {
+    //             // We found a non-number. The slice ends at this character's address.
+    //             let end_ptr = *next_char_ref as *const u8;
+    //             let offset = unsafe { end_ptr.offset_from(start_ptr) as usize };
+    //             unsafe { std::slice::from_raw_parts(start_ptr, offset) }
+    //         }
+    //         None => {
+    //             // We hit the end of the iterator.
+    //             // We use the size_hint logic or the original remaining length.
+    //             unsafe { std::slice::from_raw_parts(start_ptr, size_hint + 1) }
+    //         }
+    //     };
+    //     return Some((sl, true));
+    // }
+    //
+    // // ---------------------------------------------------------
+    // // PHASE 3: SCAN & NORMALIZE (OPTIMIZED)
+    // // ---------------------------------------------------------
+    // if GET_CHAR_TYPE[*word_start as usize] == CharClass::Upper {
+    //     #[allow(unused_variables)]
+    //     let mut assign = start_ptr as *mut u8;
+    //     let init_val = unsafe { *assign };
+    //     unsafe { *assign = init_val | 0x20 };
+    // }
+    //
+    // // #[cfg(debug_assertions)]
+    // // {
+    // //     unsafe { dbg!(*start_ptr as char) };
+    // // }
+    // let mut write_ptr = unsafe { (start_ptr as *mut u8).add(1) };
+    //
+    // // 2. The iterator should already be positioned AFTER word_start
+    // // (Assuming 'iterator' was created from the slice following word_start)
+    // let mut peekable = iterator.peekable();
+    //
+    // while let Some(&b) = peekable.next() {
+    //     match GET_CHAR_TYPE[b as usize] {
+    //         CharClass::Upper | CharClass::Lower => unsafe {
+    //             *write_ptr = b | 0x20;
+    //             write_ptr = write_ptr.add(1);
+    //         },
+    //
+    //         CharClass::C3Prefix => {
+    //             if let Some(&&next_val) = peekable.peek() {
+    //                 let mut next_v = next_val;
+    //                 if matches!(next_v, 0x8b | 0x87 | 0xab | 0xa7) {
+    //                     next_v |= 0x20;
+    //                 }
+    //                 unsafe {
+    //                     *write_ptr = b;
+    //                     *write_ptr.add(1) = next_v;
+    //                     write_ptr = write_ptr.add(2);
+    //                 }
+    //                 peekable.next(); // Consume the lookahead
+    //             } else {
+    //                 break;
+    //             }
+    //         }
+    //
+    //         CharClass::CCPrefix => {
+    //             if let Some(&&comb) = peekable.peek() {
+    //                 // To backtrack, we look at what we just wrote
+    //                 unsafe {
+    //                     // Safety: Ensure we don't underflow before word_start
+    //                     if write_ptr > (word_start as *const u8 as *mut u8) {
+    //                         let prev_ptr = write_ptr.sub(1);
+    //                         let prev = *prev_ptr;
+    //
+    //                         if prev == b'e' && comb == 0x88 {
+    //                             *prev_ptr = 0xc3;
+    //                             *write_ptr = 0xab;
+    //                             write_ptr = write_ptr.add(1);
+    //                             peekable.next();
+    //                         } else if prev == b'c' && comb == 0xa7 {
+    //                             *prev_ptr = 0xc3;
+    //                             *write_ptr = 0xa7;
+    //                             write_ptr = write_ptr.add(1);
+    //                             peekable.next();
+    //                         } else {
+    //                             // No match, but original logic skipped 2?
+    //                             peekable.next();
+    //                         }
+    //                     }
+    //                 }
+    //             } else {
+    //                 break;
+    //             }
+    //         }
+    //         _ => break,
+    //     }
+    // }
+    //
+    // // To get your final write_idx equivalent (the end of the processed word):
+    // let final_write_ptr = write_ptr;
+    // let final_len = unsafe { final_write_ptr.offset_from(start_ptr) as usize };
+    // let sl = unsafe { std::slice::from_raw_parts(start_ptr, final_len) };
     // #[cfg(debug_assertions)]
     // {
-    //     unsafe { dbg!(*start_ptr as char) };
+    //     unsafe {
+    //         dbg!(std::str::from_utf8_unchecked(sl));
+    //         // dbg!(*start_ptr as char);
+    //     }
     // }
-    let mut write_ptr = unsafe { (start_ptr as *mut u8).add(1) };
-
-    // 2. The iterator should already be positioned AFTER word_start
-    // (Assuming 'iterator' was created from the slice following word_start)
-    let mut peekable = iterator.peekable();
-
-    while let Some(&b) = peekable.next() {
-        match GET_CHAR_TYPE[b as usize] {
-            CharClass::Upper | CharClass::Lower => unsafe {
-                *write_ptr = b | 0x20;
-                write_ptr = write_ptr.add(1);
-            },
-
-            CharClass::C3Prefix => {
-                if let Some(&&next_val) = peekable.peek() {
-                    let mut next_v = next_val;
-                    if matches!(next_v, 0x8b | 0x87 | 0xab | 0xa7) {
-                        next_v |= 0x20;
-                    }
-                    unsafe {
-                        *write_ptr = b;
-                        *write_ptr.add(1) = next_v;
-                        write_ptr = write_ptr.add(2);
-                    }
-                    peekable.next(); // Consume the lookahead
-                } else {
-                    break;
-                }
-            }
-
-            CharClass::CCPrefix => {
-                if let Some(&&comb) = peekable.peek() {
-                    // To backtrack, we look at what we just wrote
-                    unsafe {
-                        // Safety: Ensure we don't underflow before word_start
-                        if write_ptr > (word_start as *const u8 as *mut u8) {
-                            let prev_ptr = write_ptr.sub(1);
-                            let prev = *prev_ptr;
-
-                            if prev == b'e' && comb == 0x88 {
-                                *prev_ptr = 0xc3;
-                                *write_ptr = 0xab;
-                                write_ptr = write_ptr.add(1);
-                                peekable.next();
-                            } else if prev == b'c' && comb == 0xa7 {
-                                *prev_ptr = 0xc3;
-                                *write_ptr = 0xa7;
-                                write_ptr = write_ptr.add(1);
-                                peekable.next();
-                            } else {
-                                // No match, but original logic skipped 2?
-                                peekable.next();
-                            }
-                        }
-                    }
-                } else {
-                    break;
-                }
-            }
-            _ => break,
-        }
-    }
-
-    // To get your final write_idx equivalent (the end of the processed word):
-    let final_write_ptr = write_ptr;
-    let final_len = unsafe { final_write_ptr.offset_from(start_ptr) as usize };
-    let sl = unsafe { std::slice::from_raw_parts(start_ptr, final_len) };
-    #[cfg(debug_assertions)]
-    {
-        unsafe {
-            dbg!(std::str::from_utf8_unchecked(sl));
-            // dbg!(*start_ptr as char);
-        }
-    }
-    // Return the newly created slice
-    Some((sl, false))
+    // // Return the newly created slice
+    // Some((sl, false))
 }
 
 // fn get_next_word(src: &mut [u8], cursor: &mut usize) -> Option<(usize, usize, bool)> {
