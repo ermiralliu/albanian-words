@@ -220,7 +220,7 @@ fn get_next_word<'a>(itr_ref: &mut *mut u8, end: *mut u8) -> Option<(&'a [u8], b
 
     let (token_type, start_ptr) = loop {
         let ch = unsafe { *itr };
-        let res = FIRST_PASS.get_basic_type(ch as usize);
+        let res = FIRST_PASS.get_first_pass_type(ch);
 
         if res != FirstPassType::Skip {
             break (res, itr);
@@ -256,7 +256,7 @@ fn get_next_word<'a>(itr_ref: &mut *mut u8, end: *mut u8) -> Option<(&'a [u8], b
             // Since we're in-place, write_ptr starts at the same spot as start_ptr
             // let mut write_ptr = start_ptr;
 
-            let move_one = unsafe { (*itr == 0xC3) as usize & (itr.add(1) != end) as usize } as usize;
+            let move_one = unsafe { (*itr == 0xC3) as usize & (itr.add(1) != end) as usize };
             itr = unsafe { itr.add(move_one) };
             unsafe { *itr |= 0x20 };
             itr = unsafe { itr.add(1) };
