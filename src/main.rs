@@ -1,4 +1,16 @@
 #![feature(portable_simd)]
+use std::simd::{
+    Simd,
+    cmp::{SimdPartialEq, SimdPartialOrd},
+    num::SimdInt,
+};
+
+const SIMD_BYTESIZE: usize = 32;
+
+const _SIMD_BITSIZE: usize = SIMD_BYTESIZE * 8;
+
+type SimdHere = Simd<u8, SIMD_BYTESIZE>;
+// type ProcessWordFn = fn(&[u8]) -> ();
 
 pub mod alb_parser;
 pub mod bitset;
@@ -7,82 +19,18 @@ pub mod properties;
 pub mod stop_words;
 
 use std::{
-    collections::{HashMap, HashSet}, simd::u64x4, sync::Mutex, thread, time::Instant, vec
+    collections::{HashMap, HashSet},
+    sync::Mutex,
+    thread,
+    time::Instant,
+    vec,
 };
 
 use alb_parser::AlbanianParser;
-use bitset::{get_first_pass_type, get_second_pass_type, FirstPassType};
 use file_readers::seq_read;
 use properties::Properties;
 use std::env;
 use stop_words::STOP_WORDS;
-
-use crate::bitset::ARR;
-
-// #[derive(Copy, Clone, Debug, PartialEq)]
-// #[repr(u8)]
-// pub enum CharClass {
-//     // I had forgotten I could do this and that it's the best possible way of handling such cases.
-//     // Delimiter = 0, // Space, punctuation, etc. // Why would i handle these differently?
-//     // Ordering these by probability but that probably doesn't matter here ngl
-//     Lower,    // a-z
-//     Upper,    // A-Z
-//     Other,    // Mostly whitespaces and punctuation and other stuff
-//     Number,   // 0-9
-//     C3Prefix, // 0xC3 (ë, ç)
-//     CCPrefix, // 0xCC (Combining marks)
-//     Byte3,    // We can instantly skip 3 bytes for these
-//     Byte4,    // We can skip 4 for these
-//     StillNumber, // If is_number, these are just delimiters
-//               // E2Prefix = 6,  // 0xE2 (Smart quotes)
-//               // Foreign = 7,   // Everything else (ö, ü, Chinese, etc.)
-// } // I'm giving up on the hyphen
-
-// const FIRST_PASS: [bool; 256] = {
-//     let mut init = [false; 256];
-//     let mut i: u8 = 0;
-//
-//     loop {
-//         if matches!(i, b'0'..=b'9' | b'A'..= b'Z'| b'a'..=b'z'| 0xC3) {
-//             init[i as usize] = true;
-//         }
-//         if i == 255 {
-//             break;
-//         }
-//         i += 1;
-//     }
-//     init
-// };
-
-// const GET_CHAR_TYPE: [CharClass; 256] = {
-//     let mut init = [CharClass::Other; 256];
-//     let mut i: u8 = 0;
-//
-//     loop {
-//         match i {
-//             b'0'..=b'9' => init[i as usize] = CharClass::Number,
-//             b'A'..=b'Z' => init[i as usize] = CharClass::Upper,
-//             b'a'..=b'z' => init[i as usize] = CharClass::Lower,
-//             0xE0..=0xEF => init[i as usize] = CharClass::Byte3,
-//
-//             // THE 4-BYTE ZONE (11110xxx)
-//             0xF0..=0xF7 => init[i as usize] = CharClass::Byte4,
-//             _ => {}
-//         }
-//         if i == 255 {
-//             break;
-//         }
-//         i += 1;
-//     }
-//     init[b'.' as usize] = CharClass::StillNumber;
-//     init[b',' as usize] = CharClass::StillNumber;
-//     init[b'\'' as usize] = CharClass::StillNumber;
-//     // init[b'-' as usize] = CharClass::Minus;
-//     init[0xC3] = CharClass::C3Prefix; // To handle extended latin, to invalidate or get e and c
-//     init[0xCC] = CharClass::CCPrefix; // Individual diaeresis 0x88, cedilla 0xA7
-//     // init[0xE2] = true;
-//     init
-// };
 
 const DEFAULT_VEC_CAPACITY: usize = 256 * 1024;
 
@@ -112,7 +60,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     // let mut count = 0;
     let set: HashSet<&[u8]> = STOP_WORDS.iter().copied().map(|word| word.as_bytes()).collect();
 
-    let reg = u64x4::from_array(ARR);
+    // let reg = u64x4::from_array(ARR);
 
     // These live on the stack of main
     let shared_reader = Mutex::new(sr);
@@ -143,40 +91,18 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                     }
 
                     let mut article_tokens = Vec::new();
-
-                    let len = local_buf.len();
-                    if len == 0 {
-                        continue;
-                    }
-
-                    let mut iterator = &mut local_buf[0] as *mut u8;
-                    let end = unsafe { iterator.add(len) };
-
-                    // while (let res = get_next_word(&mut iterator, end)) != None {
-                    while iterator != end {
-                        let id = match get_next_word(&mut iterator, end, reg) {
-                            WordType::None => break,
-                            WordType::ValidWord(items) => {
-                                if stop_words.contains(items) {
-                                    continue;
-                                }
-                                #[cfg(debug_assertions)]
-                                {
-                                    dbg!(unsafe { std::str::from_utf8_unchecked(items) });
-                                }
-                                local_parser.single_verb_to_base(items).unwrap_or(0)
-                            }
-                            WordType::Number(items) => {
-                                #[cfg(debug_assertions)]
-                                {
-                                    dbg!(unsafe { std::str::from_utf8_unchecked(items) });
-                                }
-                                continue; // this will obviously be fixed
-                            }
-                            WordType::LikelyForeign => 0,
-                        };
-                        article_tokens.push(id);
-                    }
+                    process_streaming(&mut local_buf, &mut|word| {
+                        if stop_words.contains(word) || word[0].is_ascii_digit() {
+                            return;
+                        }
+                        #[cfg(debug_assertions)]
+                        {
+                            let printable_word = unsafe {std::str::from_utf8_unchecked(word)};
+                            println!("Word: {}", printable_word);
+                        }
+                        let id = local_parser.single_verb_to_base(word);
+                        article_tokens.push(id.unwrap_or(0));
+                    });
 
                     if !article_tokens.is_empty() {
                         thread_results.push(article_tokens);
@@ -198,152 +124,99 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 }
 
 #[inline(always)]
-fn scan_while<F>(mut ptr: *mut u8, end: *mut u8, mut predicate: F) -> *mut u8
-where
-    F: FnMut(u8) -> bool,
-{
-    while ptr < end && predicate(unsafe { *ptr }) {
-        ptr = unsafe { ptr.add(1) };
-    }
-    ptr
+fn process_chunk(slic: &mut [u8]) -> u64 {
+    // 16 byte
+    assert!(slic.len() == SIMD_BYTESIZE);
+    let chunk = SimdHere::from_slice(slic);
+    // 1. Mark 0xC3 early
+    let is_c3 = chunk.simd_eq(SimdHere::splat(0xC3));
+    let c3_mask = is_c3.to_bitmask();
+
+    // 2. Transform the chunk: OR 0x20 everywhere except 0xC3 lanes
+    let not_c3_mask = !is_c3;
+    let or_vec = not_c3_mask.to_int().cast::<u8>() & SimdHere::splat(0x20);
+    let transformed = chunk | or_vec;
+
+    // 3. Range check the ALREADY transformed data
+    let is_digit = transformed.simd_ge(SimdHere::splat(b'0')) & transformed.simd_le(SimdHere::splat(b'9'));
+    let is_alpha = transformed.simd_ge(SimdHere::splat(b'a')) & transformed.simd_le(SimdHere::splat(b'z'));
+
+    let is_alnum = is_digit | is_alpha;
+
+    // 4. Build the valid_mask
+    let valid_mask = is_alnum.to_bitmask() | c3_mask | (c3_mask << 1);
+
+    // 5. Write back the transformed data
+    transformed.copy_to_slice(&mut slic[0..SIMD_BYTESIZE]);
+
+    valid_mask
 }
 
 #[inline(always)]
-fn get_next_word<'a>(itr_ref: &'a mut *mut u8, end: *mut u8, reg: u64x4) -> WordType<'a> {
-    // ---------------------------------------------------------
-    // PHASE 1: FIND WORD START
-    // ---------------------------------------------------------
-    // let word_start = iterator // the return is actually a ptr/reference, so we're actually good
-    //     .find(|&b| BITSET.contains(*b as usize))?; // position is after skip, so it's relative, we need to sum with the initial part
-    // let size_hint = iterator.len();
-    // let start_ptr = word_start as *const u8;
-    let mut itr = *itr_ref;
-    // if itr == end {
-    //     return None;
-    //     // kur behet return None del nga loop, kshu qe ska nevoje te incr itr
-    // } // Reached end of input
+fn process_streaming<F>(slic: &mut [u8], process_word: &mut F) where 
+    F: FnMut(&[u8]){
+    let mut word_start = Option::None;
 
-    let (token_type, start_ptr) = loop {
-        let ch = unsafe { *itr };
-        let res = get_first_pass_type(ch, reg);
+    let num_full_chunks = slic.len() / SIMD_BYTESIZE;
 
-        if res != FirstPassType::Skip {
-            break (res, itr);
+    for chunk_idx in 0..num_full_chunks {
+        let chunk_start = chunk_idx * SIMD_BYTESIZE;
+        let chunk = &mut slic[chunk_start..chunk_start + SIMD_BYTESIZE];
+
+        let mask = process_chunk(chunk);
+        read_word_from_bitset(mask, chunk_start, slic, &mut word_start, process_word);
+    }
+
+    let mut buffer = [0u8; SIMD_BYTESIZE]; // Pre-filled with 0s
+
+    let last_chunk_start = num_full_chunks * SIMD_BYTESIZE;
+    let last_chunk = &slic[last_chunk_start..];
+    // Copy small_data into the beginning of the buffer
+    assert!(last_chunk.len() < SIMD_BYTESIZE);
+    buffer[..last_chunk.len()].copy_from_slice(last_chunk);
+    let mask = process_chunk(&mut buffer);
+    read_word_from_bitset(mask, last_chunk_start, slic, &mut word_start, process_word);
+}
+
+#[inline(always)]
+fn read_word_from_bitset<F>(
+    mut mask: u64,
+    chunk_start: usize,
+    slic: &[u8],
+    word_start: &mut Option<usize>,
+    process_word: &mut F
+) where 
+    F: FnMut(&[u8]){
+    const MASK_NEG_BITS: u64 = (1 << SIMD_BYTESIZE) - 1;
+    let mut neg_mask = (!mask) & MASK_NEG_BITS;
+
+    loop {
+        // 1. Determine the mask
+        let (active_mask, other_mask) = match word_start {
+            Some(_) => (&mut neg_mask, &mut mask),
+            None => (&mut mask, &mut neg_mask),
+        };
+
+        // 2. Find the transition
+        let idx = active_mask.trailing_zeros() as usize;
+        if idx >= SIMD_BYTESIZE {
+            return;
         }
 
-        itr = unsafe { itr.add(1) };
-        if itr == end {
-            return WordType::None;
-            // kur behet return None del nga loop, kshu qe ska nevoje te incr itr
-        } // Reached end of input
-    };
-
-    // ---------------------------------------------------------
-    // New Code
-    // ---------------------------------------------------------
-    let mut is_foreign = false;
-    match token_type {
-        FirstPassType::Skip => unreachable!("We have already returned if it was a Skip"),
-        FirstPassType::Number => {
-            // PHASE 2: SCAN NUMBERS
-            // Equivalent to your old next_if(Number | StillNumber)
-            itr = scan_while(itr, end, |b| get_first_pass_type(b, reg) == FirstPassType::Number);
-
-            // Update the caller's iterator reference
-            *itr_ref = itr;
-
-            let len = unsafe { itr.offset_from(start_ptr) as usize };
-            let sl = unsafe { std::slice::from_raw_parts(start_ptr, len) };
-            return WordType::Number(sl);
+        // 3. Action based on state
+        if let Some(st) = *word_start {
+            let word = unsafe { slic.get_unchecked(st..chunk_start + idx) };
+            process_word(word);
+            *word_start = None;
+        } else {
+            *word_start = Some(chunk_start + idx);
         }
-        FirstPassType::Letter => {
-            let move_one = unsafe { (*itr == 0xC3) as usize & (itr.add(1) != end) as usize };
-            itr = unsafe { itr.add(move_one) };
-            unsafe { *itr |= 0x20 };
-            itr = unsafe { itr.add(1) }; // we check later that it's not equal to end so it's okay
 
-            // itr was already incremented by 1 after the loop to point to the next char
-            while itr < end {
-                let b = unsafe { *itr };
-                // terrible idea to name it FIRST_PASS
-                match get_second_pass_type(b, reg) {
-                    bitset::SecondPassType::END => break,
-                    bitset::SecondPassType::Letter => {
-                        unsafe { *itr |= 0x20 };
-                    }
-                    bitset::SecondPassType::XC3 => {
-                        unsafe {
-                            let next_ptr = itr.add(1);
-                            if next_ptr == end {
-                                break;
-                            }
-                            *next_ptr |= 0x20;
-                            itr = next_ptr;
-                            if !matches!(*next_ptr, 0xab | 0xa7) {
-                                is_foreign = true;
-                            }
-                        };
-                    }
-                    bitset::SecondPassType::XCC => {
-                        break;
-                        unsafe {
-                            let en = if itr.add(10) < end { itr.add(10) } else { end };
-                            let offset = en.offset_from(itr);
-                            let stri = std::slice::from_raw_parts(itr.sub(1), offset as usize);
-                            let sta = std::str::from_utf8_unchecked(stri);
-                            println!("String: {}, length: {}", sta, sta.len());
-                        }
-                        panic!("It wasn't supposed to happen this way. Sorry.");
-                    }
-                }
-                unsafe { itr = itr.add(1) };
-            }
-            //     match GET_CHAR_TYPE[b as usize] {
-            //         CharClass::CCPrefix => unsafe {
-            //             // let next_ptr = itr.add(1);
-            //             itr = itr.add(1);
-            //             // if next_ptr < end {
-            //             //     let comb = *next_ptr;
-            //             //     // Safety: write_ptr is always >= start_ptr.add(1) here
-            //             //     let prev_ptr = write_ptr.sub(1);
-            //             //     let prev = *prev_ptr;
-            //             //
-            //             //     if prev == b'e' && comb == 0x88 {
-            //             //         *prev_ptr = 0xc3;
-            //             //         *write_ptr = 0xab;
-            //             //         write_ptr = write_ptr.add(1);
-            //             //     } else if prev == b'c' && comb == 0xa7 {
-            //             //         *prev_ptr = 0xc3;
-            //             //         *write_ptr = 0xa7;
-            //             //         write_ptr = write_ptr.add(1);
-            //             //     } else {
-            //             //         // No match, just consume (or TODO: handle 3-byte normalization)
-            //             //     }
-            //             //     itr = itr.add(2);
-            //             // } else {
-            //             //     itr = itr.add(1);
-            //             //     break;
-            //             // }
-            //         },
-            //         _ => break,
-            //     }
-            // }
-            *itr_ref = itr;
-            if is_foreign {
-                return WordType::LikelyForeign;
-            }
-            // The part below would normally use write_ptr, but I guess we return it normally from
-            // here + a flag.
-            let final_len = unsafe { itr.offset_from(start_ptr) as usize };
-            let sl = unsafe { std::slice::from_raw_parts(start_ptr, final_len) };
-            WordType::ValidWord(sl)
-        }
+        *other_mask &= zero_everything_before(idx);
     }
 }
 
-enum WordType<'a> {
-    None,
-    ValidWord(&'a [u8]),
-    Number(&'a [u8]),
-    LikelyForeign,
+#[inline(always)]
+fn zero_everything_before(idx: usize) -> u64 {
+    return !((1 << (idx + 1)) - 1);
 }
