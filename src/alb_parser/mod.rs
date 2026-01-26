@@ -6,7 +6,7 @@ type SuffixFunction = fn(u64) -> Option<&'static [&'static [u8]]>;
 
 // using &[u8] lets you have fun without worrying about sizes. Nice Rust stuff.
 
-const DEFAULT_WORD_BUFFER_CAPACITY: usize = 8192; // Increased this size only because of some
+const DEFAULT_WORD_BUFFER_CAPACITY: usize = 32; // Increased this size only because of some
 // retarded articles
 
 pub struct AlbanianParser<'a> {
@@ -25,9 +25,13 @@ impl<'a> AlbanianParser<'a> {
             base_form_len: 0,
         }
     }
-
+    #[inline]
     pub fn single_verb_to_base(&mut self, verb: &[u8]) -> Option<u16> {
         // we can use copy non-overlapping if the copy below is not enough
+        if verb.len() >= 32 { // I was wondering how to deal with it but yeah. Just return nothing.
+                              // The largest albanian word is less
+            return None;
+        }
         self.base_form[..verb.len()].copy_from_slice(verb);
         let len = verb.len();
         self.base_form_len = len;
@@ -49,7 +53,7 @@ impl<'a> AlbanianParser<'a> {
             .filter(|&(length, _)| length < &verb.len())
             .find_map(|&(len, func)| self.possibilities_for_verb(verb, initial_suffix, len, func))
     }
-
+    #[inline]
     fn possibilities_for_verb(
         // this part is a little bit too much for what it's doing
         &mut self,

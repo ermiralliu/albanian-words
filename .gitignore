@@ -12,3 +12,5 @@ my_app_run.data.third
 *.annotation
 
 config.ini
+
+s25flags.txt

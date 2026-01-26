@@ -1,9 +1,9 @@
 #![feature(portable_simd)]
-use std::simd::{
+use std::{hint::unreachable_unchecked, simd::{
     Simd,
     cmp::{SimdPartialEq, SimdPartialOrd},
     num::SimdInt,
-};
+}};
 
 const SIMD_BYTESIZE: usize = 32;
 
@@ -58,7 +58,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     let sr = seq_read::SequentialFileReader::try_new(&config.article_file, config.article_separator)?;
     // let mut count = 0;
-    let set: HashSet<&[u8]> = STOP_WORDS.iter().copied().map(|word| word.as_bytes()).collect();
+    // let set: HashSet<&[u8]> = STOP_WORDS.iter().copied().map(|word| word.as_bytes()).collect();
 
     // let reg = u64x4::from_array(ARR);
 
@@ -66,6 +66,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let shared_reader = Mutex::new(sr);
     // 'set' and 'parser' can just be regular references
     let core_count = num_cpus::get_physical();
+    // let core_count = 1; 
 
     let final_tokens: Vec<Vec<u16>> = thread::scope(|s| {
         let mut handles = vec![];
@@ -73,7 +74,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         for _ in 0..core_count {
             // We borrow from the outer scope
             let r = &shared_reader;
-            let stop_words = &set;
+            // let stop_words = &set;
             let mut local_parser = AlbanianParser::new(&map);
 
             let h = s.spawn(move || {
@@ -92,7 +93,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
                     let mut article_tokens = Vec::new();
                     process_streaming(&mut local_buf, &mut|word| {
-                        if stop_words.contains(word) || word[0].is_ascii_digit() {
+                        if /* stop_words.contains(word) || */ word[0].is_ascii_digit() {
                             return;
                         }
                         #[cfg(debug_assertions)]
@@ -123,19 +124,28 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     Ok(())
 }
 
-#[inline(always)]
-fn process_chunk(slic: &mut [u8]) -> u64 {
+// #[inline(always)]
+#[target_feature(enable = "avx2")]
+fn process_chunk(slic: &mut [u8], prev_ends_with_c3: u64) -> (u64, u64) {
     // 16 byte
-    assert!(slic.len() == SIMD_BYTESIZE);
+    if slic.len() != SIMD_BYTESIZE {
+        unsafe { unreachable_unchecked(); }
+    }
+    const SIMD_BYTESIZE_SHIFT: usize = SIMD_BYTESIZE -1;
+
     let chunk = SimdHere::from_slice(slic);
     // 1. Mark 0xC3 early
     let is_c3 = chunk.simd_eq(SimdHere::splat(0xC3));
     let c3_mask = is_c3.to_bitmask();
-
+    let is_last_c3 = c3_mask >> SIMD_BYTESIZE_SHIFT; // this is not used. it's returned. We only use the previous one
+                                                      //
     // 2. Transform the chunk: OR 0x20 everywhere except 0xC3 lanes
-    let not_c3_mask = !is_c3;
-    let or_vec = not_c3_mask.to_int().cast::<u8>() & SimdHere::splat(0x20);
-    let transformed = chunk | or_vec;
+    let lower_hack = chunk | SimdHere::splat(0x20);
+    let transformed = is_c3.select(chunk, lower_hack); // Uses vector blend, much faster than casting masks
+
+    // let not_c3_mask = !is_c3;
+    // let or_vec = not_c3_mask.to_int().cast::<u8>() & SimdHere::splat(0x20);
+    // let transformed = chunk | or_vec;
 
     // 3. Range check the ALREADY transformed data
     let is_digit = transformed.simd_ge(SimdHere::splat(b'0')) & transformed.simd_le(SimdHere::splat(b'9'));
@@ -144,26 +154,29 @@ fn process_chunk(slic: &mut [u8]) -> u64 {
     let is_alnum = is_digit | is_alpha;
 
     // 4. Build the valid_mask
-    let valid_mask = is_alnum.to_bitmask() | c3_mask | (c3_mask << 1);
+    let valid_mask = is_alnum.to_bitmask() | c3_mask | (c3_mask << 1) | prev_ends_with_c3 as u64;
 
     // 5. Write back the transformed data
     transformed.copy_to_slice(&mut slic[0..SIMD_BYTESIZE]);
 
-    valid_mask
+    (valid_mask, is_last_c3)
 }
 
-#[inline(always)]
+
+// #[inline(always)]
 fn process_streaming<F>(slic: &mut [u8], process_word: &mut F) where 
     F: FnMut(&[u8]){
     let mut word_start = Option::None;
 
     let num_full_chunks = slic.len() / SIMD_BYTESIZE;
+    let mut ends_with_c3 = 0; // this is basically a boolean, but we don't want to pay for that
 
     for chunk_idx in 0..num_full_chunks {
         let chunk_start = chunk_idx * SIMD_BYTESIZE;
         let chunk = &mut slic[chunk_start..chunk_start + SIMD_BYTESIZE];
 
-        let mask = process_chunk(chunk);
+        let (mask, ends_with) = unsafe { process_chunk(chunk, ends_with_c3) };
+        ends_with_c3 = ends_with;
         read_word_from_bitset(mask, chunk_start, slic, &mut word_start, process_word);
     }
 
@@ -173,12 +186,15 @@ fn process_streaming<F>(slic: &mut [u8], process_word: &mut F) where
     let last_chunk = &slic[last_chunk_start..];
     // Copy small_data into the beginning of the buffer
     assert!(last_chunk.len() < SIMD_BYTESIZE);
+    if last_chunk.len() >= SIMD_BYTESIZE {
+        unsafe { unreachable_unchecked(); }
+    }
     buffer[..last_chunk.len()].copy_from_slice(last_chunk);
-    let mask = process_chunk(&mut buffer);
-    read_word_from_bitset(mask, last_chunk_start, slic, &mut word_start, process_word);
+    let mask = unsafe { process_chunk(&mut buffer, ends_with_c3) };
+    read_word_from_bitset(mask.0, last_chunk_start, slic, &mut word_start, process_word);
 }
 
-#[inline(always)]
+// #[inline(always)]
 fn read_word_from_bitset<F>(
     mut mask: u64,
     chunk_start: usize,
