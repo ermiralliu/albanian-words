@@ -91,7 +91,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                         }
                     }
 
-                    let mut article_tokens = Vec::new();
+                    let mut article_tokens = Vec::with_capacity(512);
                     process_streaming(&mut local_buf, &mut|word| {
                         if /* stop_words.contains(word) || */ word[0].is_ascii_digit() {
                             return;
