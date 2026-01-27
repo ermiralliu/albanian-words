@@ -1,4 +1,4 @@
-use std::collections::HashMap;
+use std::{collections::HashMap, hash::BuildHasher};
 // use unicode_normalization::UnicodeNormalization;
 
 // type SuffixFunction = fn(&str) -> Option<&[&str]>;
@@ -9,16 +9,18 @@ type SuffixFunction = fn(u64) -> Option<&'static [&'static [u8]]>;
 const DEFAULT_WORD_BUFFER_CAPACITY: usize = 32; // Increased this size only because of some
 // retarded articles
 
-pub struct AlbanianParser<'a> {
-    vocab: &'a HashMap<&'a [u8], u16>,
+pub struct AlbanianParser<'a, K> where 
+    K: BuildHasher {
+    vocab: &'a HashMap<&'a [u8], u16, K>,
     // normalization_buffer: String, // after normalizing ë and ç
     // main_buffer: String,          // after lowercasing the normalization buffer
     base_form: [u8; DEFAULT_WORD_BUFFER_CAPACITY], // after lowercasing the normalization buffer
     base_form_len: usize,
 }
 
-impl<'a> AlbanianParser<'a> {
-    pub fn new(vocab: &'a HashMap<&'a [u8], u16>) -> AlbanianParser<'a> {
+impl<'a, K> AlbanianParser<'a, K> where 
+    K: BuildHasher + Default {
+    pub fn new(vocab: &'a HashMap<&'a [u8], u16, K>) -> AlbanianParser<'a, K> {
         AlbanianParser {
             vocab,
             base_form: [0u8; DEFAULT_WORD_BUFFER_CAPACITY],

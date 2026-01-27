@@ -29,6 +29,7 @@ use std::{
 use alb_parser::AlbanianParser;
 use file_readers::seq_read;
 use properties::Properties;
+use rustc_hash::FxBuildHasher;
 use std::env;
 use stop_words::STOP_WORDS;
 
@@ -38,7 +39,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     println!("Hello, world!");
     // let verbs = vec!["punojmë", "punuam", "shkruar", "lexuar", "vendosur"];
     let vocab_vector: Vec<&[u8]> = vec![b"punoj", b"shkruaj", b"lexoj", b"vendos"]; // this is just for tests,
-    let mut map = HashMap::new();
+    let mut map: HashMap<&[u8], u16, FxBuildHasher> = HashMap::default();
     for (i, &word) in vocab_vector.iter().enumerate() {
         map.insert(word, i as u16);
     }
@@ -75,11 +76,11 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             // We borrow from the outer scope
             let r = &shared_reader;
             // let stop_words = &set;
-            let mut local_parser = AlbanianParser::new(&map);
+            let mut local_parser: AlbanianParser<'_, FxBuildHasher> = AlbanianParser::new(&map);
 
             let h = s.spawn(move || {
                 let mut local_buf = Vec::with_capacity(DEFAULT_VEC_CAPACITY);
-                let mut thread_results = Vec::new();
+                let mut thread_results = Vec::with_capacity(128);
 
                 loop {
                     local_buf.clear();
