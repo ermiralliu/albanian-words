@@ -1,12 +1,9 @@
 #![feature(portable_simd)]
-use std::{
-    hint::unreachable_unchecked,
-    simd::{
-        Simd,
-        cmp::{SimdPartialEq, SimdPartialOrd},
-        num::SimdInt,
-    },
-};
+use std::{hint::unreachable_unchecked, simd::{
+    Simd,
+    cmp::{SimdPartialEq, SimdPartialOrd},
+    num::SimdInt,
+}};
 
 const SIMD_BYTESIZE: usize = 32;
 
@@ -70,7 +67,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let shared_reader = Mutex::new(sr);
     // 'set' and 'parser' can just be regular references
     let core_count = num_cpus::get_physical();
-    // let core_count = 1;
+    // let core_count = 1; 
 
     let final_tokens: Vec<Vec<u16>> = thread::scope(|s| {
         let mut handles = vec![];
@@ -96,15 +93,13 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                     }
 
                     let mut article_tokens = Vec::with_capacity(256);
-                    process_streaming(&mut local_buf, &mut |word| {
-                        if
-                        /* stop_words.contains(word) || */
-                        word[0].is_ascii_digit() {
+                    process_streaming(&mut local_buf, &mut|word| {
+                        if /* stop_words.contains(word) || */ word[0].is_ascii_digit() {
                             return;
                         }
                         #[cfg(debug_assertions)]
                         {
-                            let printable_word = unsafe { std::str::from_utf8_unchecked(word) };
+                            let printable_word = unsafe {std::str::from_utf8_unchecked(word)};
                             println!("Word: {}", printable_word);
                         }
                         let id = local_parser.single_verb_to_base(word);
@@ -135,18 +130,16 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 fn process_chunk(slic: &mut [u8], prev_ends_with_c3: u64) -> (u64, u64) {
     // 16 byte
     if slic.len() != SIMD_BYTESIZE {
-        unsafe {
-            unreachable_unchecked();
-        }
+        unsafe { unreachable_unchecked(); }
     }
-    const SIMD_BYTESIZE_SHIFT: usize = SIMD_BYTESIZE - 1;
+    const SIMD_BYTESIZE_SHIFT: usize = SIMD_BYTESIZE -1;
 
     let chunk = SimdHere::from_slice(slic);
     // 1. Mark 0xC3 early
     let is_c3 = chunk.simd_eq(SimdHere::splat(0xC3));
     let c3_mask = is_c3.to_bitmask();
     let is_last_c3 = c3_mask >> SIMD_BYTESIZE_SHIFT; // this is not used. it's returned. We only use the previous one
-    //
+                                                      //
     // 2. Transform the chunk: OR 0x20 everywhere except 0xC3 lanes
     let lower_hack = chunk | SimdHere::splat(0x20);
     let transformed = is_c3.select(chunk, lower_hack); // Uses vector blend, much faster than casting masks
@@ -170,11 +163,10 @@ fn process_chunk(slic: &mut [u8], prev_ends_with_c3: u64) -> (u64, u64) {
     (valid_mask, is_last_c3)
 }
 
+
 // #[inline(always)]
-fn process_streaming<F>(slic: &mut [u8], process_word: &mut F)
-where
-    F: FnMut(&[u8]),
-{
+fn process_streaming<F>(slic: &mut [u8], process_word: &mut F) where 
+    F: FnMut(&[u8]){
     let mut word_start = Option::None;
 
     let num_full_chunks = slic.len() / SIMD_BYTESIZE;
@@ -196,9 +188,7 @@ where
     // Copy small_data into the beginning of the buffer
     assert!(last_chunk.len() < SIMD_BYTESIZE);
     if last_chunk.len() >= SIMD_BYTESIZE {
-        unsafe {
-            unreachable_unchecked();
-        }
+        unsafe { unreachable_unchecked(); }
     }
     buffer[..last_chunk.len()].copy_from_slice(last_chunk);
     let mask = unsafe { process_chunk(&mut buffer, ends_with_c3) };
@@ -211,10 +201,9 @@ fn read_word_from_bitset<F>(
     chunk_start: usize,
     slic: &[u8],
     word_start: &mut Option<usize>,
-    process_word: &mut F,
-) where
-    F: FnMut(&[u8]),
-{
+    process_word: &mut F
+) where 
+    F: FnMut(&[u8]){
     const MASK_NEG_BITS: u64 = (1 << SIMD_BYTESIZE) - 1;
     let mut neg_mask = (!mask) & MASK_NEG_BITS;
 
@@ -242,100 +231,6 @@ fn read_word_from_bitset<F>(
 
         *other_mask &= zero_everything_before(idx);
     }
-}
-
-fn process_streaming_alternative<F>(slic: &mut [u8], process_word: &mut F)
-where
-    F: FnMut(&[u8]),
-{
-    let mut word_start = Option::None;
-
-    let num_full_chunks = slic.len() / SIMD_BYTESIZE;
-    let mut ends_with_c3 = 0; // this is basically a boolean, but we don't want to pay for that
-
-    for chunk_idx in 0..num_full_chunks {
-        let chunk_start = chunk_idx * SIMD_BYTESIZE;
-
-        let (mask, ends_with) =
-            unsafe { process_chunk(&mut slic.get_unchecked_mut(chunk_start..chunk_start + SIMD_BYTESIZE), ends_with_c3) };
-
-        ends_with_c3 = ends_with;
-        let (arr, count_and_is_next) = read_word_from_bitset_alternative(mask, word_start.is_none());
-        let length = (count_and_is_next >> 1) as usize;
-        let mut start = 0;
-        let is_next_in_word = (count_and_is_next & 1) == 1;
-        if let Some(start_idx) = word_start {
-            let word_end = unsafe { *arr.get_unchecked(0) } as usize;
-            let word = unsafe {&slic.get_unchecked(start_idx..word_end) };
-            process_word(word);
-            start = 1;
-        }
-        let chunk = &slic[chunk_start..chunk_start + SIMD_BYTESIZE];
-        for i in (start..length).step_by(2) {
-            let word_start = unsafe { *arr.get_unchecked(i) as usize };
-            let word_end = unsafe { *arr.get_unchecked(i + 1) } as usize;
-            let word = unsafe {&chunk.get_unchecked(word_start..word_end)};
-            process_word(word);
-        }
-        word_start = if is_next_in_word {
-            let place = unsafe { *arr.get_unchecked(length - 1) } as usize;
-            Some(chunk_start + place)
-        } else {
-            None
-        }
-    }
-
-    let mut buffer = [0u8; SIMD_BYTESIZE]; // Pre-filled with 0s
-
-    let last_chunk_start = num_full_chunks * SIMD_BYTESIZE;
-    let last_chunk = &slic[last_chunk_start..];
-    // Copy small_data into the beginning of the buffer
-    assert!(last_chunk.len() < SIMD_BYTESIZE);
-    if last_chunk.len() >= SIMD_BYTESIZE {
-        unsafe {
-            std::hint::unreachable_unchecked();
-        }
-    }
-    buffer[..last_chunk.len()].copy_from_slice(last_chunk);
-    let mask = unsafe { process_chunk(&mut buffer, ends_with_c3) };
-    read_word_from_bitset(mask.0, last_chunk_start, slic, &mut word_start, process_word);
-}
-
-fn read_word_from_bitset_alternative(mut mask: u64, is_in_word: bool) -> ([u8; 16], u8) {
-    // I think this is so simple now, that it should get instantly hyperoptimized. Like, this is
-    // the best kinda shit for pipelining
-    const MASK_NEG_BITS: u64 = (1 << SIMD_BYTESIZE) - 1;
-    let mut neg_mask = (!mask) & MASK_NEG_BITS;
-    let mut indices = [0u8; 16];
-    let mut is_in_word = is_in_word;
-    let mut index_count = 0;
-
-    loop {
-        // 1. Determine the mask
-        let (active_mask, other_mask) = if is_in_word {
-            (&mut neg_mask, &mut mask)
-        } else {
-            (&mut mask, &mut neg_mask)
-        };
-
-        // 2. Find the transition
-        let idx = active_mask.trailing_zeros() as usize;
-        if idx >= SIMD_BYTESIZE {
-            break;
-        }
-        if index_count > 15 {
-            unsafe { std::hint::unreachable_unchecked() };
-        }
-        // Add new delta
-        indices[index_count] = idx as u8;
-        index_count += 1;
-
-        // 3. Action based on state
-        is_in_word = !is_in_word;
-
-        *other_mask &= zero_everything_before(idx);
-    }
-    (indices, is_in_word as u8 + ((index_count as u8) << 1))
 }
 
 #[inline(always)]
