@@ -1,7 +1,8 @@
-use std::{collections::HashMap, hash::BuildHasher};
+use std::{collections::HashMap, hash::BuildHasher, hint::unreachable_unchecked};
 
-use crate::alb_parser::three_byte::suffix_3byte_final;
+use crate::alb_parser::{one_byte::suffix_1byte_new, three_byte::{J_EM_ARR, suffix_3byte_final}};
 pub mod three_byte;
+pub mod one_byte;
 // use unicode_normalization::UnicodeNormalization;
 
 // type SuffixFunction = fn(&str) -> Option<&[&str]>;
@@ -39,7 +40,7 @@ where
     pub fn single_verb_to_base(&mut self, verb: &[u8]) -> Option<u16> {
         // we can use copy non-overlapping if the copy below is not enough
         if verb.len() >= 32 {
-            unsafe { std::hint::unreachable_unchecked() } ;
+            unsafe { std::hint::unreachable_unchecked() };
             // I was wondering how to deal with it but yeah. Just return nothing.
             // The largest albanian word is less
             // return None;
@@ -49,7 +50,8 @@ where
         self.base_form_len = len;
 
         const CHECKS: &[SuffixFunction] = &[
-            suffix_1byte,
+            // suffix_1byte,
+            suffix_1byte_new,
             suffix_2byte,
             // suffix_3byte_new,
             suffix_3byte_final,
@@ -70,8 +72,7 @@ where
             .iter()
             .enumerate()
             .rev() // Iterate from smallest to largest suffix (or vice versa depending on array order)
-            .find_map(|(i, &func)|
-                self.possibilities_for_verb(verb, initial_suffix, i+1, func))
+            .find_map(|(i, &func)| self.possibilities_for_verb(verb, initial_suffix, i + 1, func))
     }
 
     #[inline]
@@ -106,7 +107,7 @@ where
                     // 2. Update the length to account for the new suffix length
                     let current_total_len = suffix_offset + el_bytes.len();
 
-    // 3. Lookup in vocab using a slice of the array
+                    // 3. Lookup in vocab using a slice of the array
                     if let Some(matching_word) = self.vocab.get(&self.base_form[..current_total_len]) {
                         return Some(*matching_word);
                     }
@@ -154,7 +155,6 @@ fn byte_arr_to_nr_clean(st: &[u8]) -> u64 {
     big_endian >> (64 - (len * 8))
 }
 
-
 const U: u64 = byte_arr_to_nr(b"u");
 const J: u64 = byte_arr_to_nr(b"j");
 const N: u64 = byte_arr_to_nr(b"n");
@@ -166,14 +166,33 @@ fn suffix_1byte(ch: u64) -> Option<&'static [&'static [u8]]> {
     // CALL_COUNT_1.fetch_add(1, Ordering::Relaxed);
     // For now, I'm keeping it simple with
     // static lifetimes
+    let j_em_arr = J_EM_ARR; // &[b"j", b"e", b""];
     let final_byte = ch & LAST_BYTE;
-    let mat: &[&[u8]] = match final_byte {
-        U => &[b"j", b"e", b""],
-        J | N => &[b"j"],
-        A | E | I => &[b""],
-        _ => return None,
-    };
-    Some(mat)
+    match final_byte % 4 {
+        0 if matches!(final_byte, J | N) => {
+            return Some(unsafe { j_em_arr.get_unchecked(2..=2)});
+        }
+        1 => {
+            if final_byte >= 97 && final_byte <= 105 {
+                return Some(unsafe { j_em_arr.get_unchecked(2..=2)});
+            } else if final_byte == U {
+                return Some(j_em_arr);
+            }
+        }
+        2 | 3 => return None,
+        _ => unsafe { unreachable_unchecked() },
+    }
+    None
+    // if final_byte % 4 == 0 && matches!(final_byte, J|N) {
+    //     return Some(&j_em_arr[0..=0]);
+    // }
+    // let mat: &[&[u8]] = match final_byte {
+    //     U => j_em_arr,
+    //     J | N => &j_em_arr[0..=0],
+    //     A | E | I => &j_em_arr[2..=2],
+    //     _ => return None,
+    // };
+    // Some(mat)
 }
 
 const E_DIAERESIS: u64 = u64::from_le_bytes([0xC3, 0xAB, 0, 0, 0, 0, 0, 0]);
@@ -281,4 +300,3 @@ fn suffix_5byte(st: u64) -> Option<&'static [&'static [u8]]> {
     };
     Some(mat)
 }
-
