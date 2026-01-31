@@ -1,4 +1,4 @@
-use std::{collections::HashMap, hash::BuildHasher,};
+use std::{collections::HashMap, hash::BuildHasher};
 // use unicode_normalization::UnicodeNormalization;
 
 // type SuffixFunction = fn(&str) -> Option<&[&str]>;
@@ -9,8 +9,10 @@ type SuffixFunction = fn(u64) -> Option<&'static [&'static [u8]]>;
 const DEFAULT_WORD_BUFFER_CAPACITY: usize = 32; // Increased this size only because of some
 // retarded articles
 
-pub struct AlbanianParser<'a, K> where 
-    K: BuildHasher {
+pub struct AlbanianParser<'a, K>
+where
+    K: BuildHasher,
+{
     vocab: &'a HashMap<&'a [u8], u16, K>,
     // normalization_buffer: String, // after normalizing ë and ç
     // main_buffer: String,          // after lowercasing the normalization buffer
@@ -18,8 +20,10 @@ pub struct AlbanianParser<'a, K> where
     base_form_len: usize,
 }
 
-impl<'a, K> AlbanianParser<'a, K> where 
-    K: BuildHasher + Default {
+impl<'a, K> AlbanianParser<'a, K>
+where
+    K: BuildHasher + Default,
+{
     pub fn new(vocab: &'a HashMap<&'a [u8], u16, K>) -> AlbanianParser<'a, K> {
         AlbanianParser {
             vocab,
@@ -30,21 +34,22 @@ impl<'a, K> AlbanianParser<'a, K> where
     #[inline]
     pub fn single_verb_to_base(&mut self, verb: &[u8]) -> Option<u16> {
         // we can use copy non-overlapping if the copy below is not enough
-        if verb.len() >= 32 { // I was wondering how to deal with it but yeah. Just return nothing.
-                              // The largest albanian word is less
+        if verb.len() >= 32 {
+            // I was wondering how to deal with it but yeah. Just return nothing.
+            // The largest albanian word is less
             return None;
         }
         self.base_form[..verb.len()].copy_from_slice(verb);
         let len = verb.len();
         self.base_form_len = len;
-        // const CHECKS: &[(usize, SuffixFunction)] = &[
-        //     (5, suffix_5byte),
-        //     (4, suffix_4byte),
-        //     (3, suffix_3byte),
-        //     (2, suffix_2byte),
-        //     (1, suffix_1byte),
-        // ];
-        
+        const CHECKS: &[(usize, SuffixFunction)] = &[
+            (1, suffix_1byte),
+            (2, suffix_2byte),
+            (3, suffix_3byte),
+            (4, suffix_4byte),
+            (5, suffix_5byte),
+        ];
+
         // let initial_suffix = match len {
         //     0..=2 => return None,
         //     3..=6 => byte_arr_to_nr(&verb[2..]), // 1, 2, 3, 4 => possible lengths
@@ -53,32 +58,38 @@ impl<'a, K> AlbanianParser<'a, K> where
         let range = match len {
             0..=2 => unsafe { std::hint::unreachable_unchecked() }, // we're checking outside the function
             3..=6 => 2..len,
-            7.. => len-5..len,
+            7.. => len - 5..len,
         };
         let range_length = (&range).len();
 
         let initial_suffix = byte_arr_to_nr(&verb[range]);
 
-        if range_length == 5 { // here we can later move suffix_byte_len, and initial_suffix as field variables
-            let found = self.possibilities_for_verb(verb, initial_suffix, 5, suffix_5byte);
-            if found.is_some() { return found };
-        } 
-        if range_length >= 4 {
-            let found = self.possibilities_for_verb(verb, initial_suffix, 4, suffix_4byte);
-            if found.is_some() { return found };
-        } 
-        if range_length >= 3 {
-            let found = self.possibilities_for_verb(verb, initial_suffix, 3, suffix_3byte);
-            if found.is_some() { return found };
-        } 
-        if range_length >= 2 {
-            let found = self.possibilities_for_verb(verb, initial_suffix, 2, suffix_2byte);
-            if found.is_some() { return found };
-        } 
-        if range_length >= 1 {
-            let found = self.possibilities_for_verb(verb, initial_suffix, 1, suffix_1byte);
-            if found.is_some() { return found };
-        } 
+        // CHECKS[..if range_length <= 5 {range_length} else { 5 }].iter().find( ||)
+        CHECKS[..range_length.min(5)]
+            .iter()
+            .rev() // Iterate from smallest to largest suffix (or vice versa depending on array order)
+            .find_map(|&(len, func)| self.possibilities_for_verb(verb, initial_suffix, len, func));
+
+        // if range_length == 5 { // here we can later move suffix_byte_len, and initial_suffix as field variables
+        //     let found = self.possibilities_for_verb(verb, initial_suffix, 5, suffix_5byte);
+        //     if found.is_some() { return found };
+        // }
+        // if range_length >= 4 {
+        //     let found = self.possibilities_for_verb(verb, initial_suffix, 4, suffix_4byte);
+        //     if found.is_some() { return found };
+        // }
+        // if range_length >= 3 {
+        //     let found = self.possibilities_for_verb(verb, initial_suffix, 3, suffix_3byte);
+        //     if found.is_some() { return found };
+        // }
+        // if range_length >= 2 {
+        //     let found = self.possibilities_for_verb(verb, initial_suffix, 2, suffix_2byte);
+        //     if found.is_some() { return found };
+        // }
+        // if range_length >= 1 {
+        //     let found = self.possibilities_for_verb(verb, initial_suffix, 1, suffix_1byte);
+        //     if found.is_some() { return found };
+        // }
 
         None
     }
