@@ -1,4 +1,7 @@
 use std::{collections::HashMap, hash::BuildHasher};
+
+use crate::alb_parser::three_byte::suffix_3byte_final;
+pub mod three_byte;
 // use unicode_normalization::UnicodeNormalization;
 
 // type SuffixFunction = fn(&str) -> Option<&[&str]>;
@@ -48,7 +51,8 @@ where
         const CHECKS: &[SuffixFunction] = &[
             suffix_1byte,
             suffix_2byte,
-            suffix_3byte,
+            // suffix_3byte_new,
+            suffix_3byte_final,
             suffix_4byte,
             suffix_5byte,
         ];
@@ -102,7 +106,7 @@ where
                     // 2. Update the length to account for the new suffix length
                     let current_total_len = suffix_offset + el_bytes.len();
 
-                    // 3. Lookup in vocab using a slice of the array
+    // 3. Lookup in vocab using a slice of the array
                     if let Some(matching_word) = self.vocab.get(&self.base_form[..current_total_len]) {
                         return Some(*matching_word);
                     }
@@ -123,7 +127,7 @@ where
 // const LAST_BYTE: u64 = 0xFF00_0000_0000_0000;
 
 const LAST_4_BYTES: u64 = 0x0000_0000_FFFF_FFFF;
-const LAST_3_BYTES: u64 = 0x0000_0000_00FF_FFFF;
+// const LAST_3_BYTES: u64 = 0x0000_0000_00FF_FFFF;
 const LAST_2_BYTES: u64 = 0x0000_0000_0000_FFFF;
 const LAST_BYTE: u64 = 0x0000_0000_0000_00FF;
 
@@ -208,43 +212,43 @@ fn suffix_2byte(st: u64) -> Option<&'static [&'static [u8]]> {
     Some(mat)
 }
 
-const MË: u64 = byte_arr_to_nr("më".as_bytes());
-const RË: u64 = byte_arr_to_nr("rë".as_bytes());
-const TË: u64 = byte_arr_to_nr("të".as_bytes());
-const NË: u64 = byte_arr_to_nr("në".as_bytes());
-const ËM: u64 = byte_arr_to_nr("ëm".as_bytes());
-const ËT: u64 = byte_arr_to_nr("ët".as_bytes());
-const ËN: u64 = byte_arr_to_nr("ën".as_bytes());
+pub const MË: u64 = byte_arr_to_nr("më".as_bytes());
+pub const RË: u64 = byte_arr_to_nr("rë".as_bytes());
+pub const TË: u64 = byte_arr_to_nr("të".as_bytes());
+pub const NË: u64 = byte_arr_to_nr("në".as_bytes());
+pub const ËM: u64 = byte_arr_to_nr("ëm".as_bytes());
+pub const ËT: u64 = byte_arr_to_nr("ët".as_bytes());
+pub const ËN: u64 = byte_arr_to_nr("ën".as_bytes());
 
-const OVA: u64 = byte_arr_to_nr(b"ova");
-const OVE: u64 = byte_arr_to_nr(b"ove");
-const UAM: u64 = byte_arr_to_nr(b"uam");
-const UAT: u64 = byte_arr_to_nr(b"uat");
-const UAN: u64 = byte_arr_to_nr(b"uan");
-const JTA: u64 = byte_arr_to_nr(b"jta");
-const JTE: u64 = byte_arr_to_nr(b"jte");
-const JTI: u64 = byte_arr_to_nr(b"jti");
-const NIM: u64 = byte_arr_to_nr(b"nim");
-const NIT: u64 = byte_arr_to_nr(b"nit");
-const NIN: u64 = byte_arr_to_nr(b"nin");
-const NTE: u64 = byte_arr_to_nr(b"nte");
-const TUR: u64 = byte_arr_to_nr(b"tur");
-const UAR: u64 = byte_arr_to_nr(b"uar");
+pub const OVA: u64 = byte_arr_to_nr(b"ova");
+pub const OVE: u64 = byte_arr_to_nr(b"ove");
+pub const UAM: u64 = byte_arr_to_nr(b"uam");
+pub const UAT: u64 = byte_arr_to_nr(b"uat");
+pub const UAN: u64 = byte_arr_to_nr(b"uan");
+pub const JTA: u64 = byte_arr_to_nr(b"jta");
+pub const JTE: u64 = byte_arr_to_nr(b"jte");
+pub const JTI: u64 = byte_arr_to_nr(b"jti");
+pub const NIM: u64 = byte_arr_to_nr(b"nim");
+pub const NIT: u64 = byte_arr_to_nr(b"nit");
+pub const NIN: u64 = byte_arr_to_nr(b"nin");
+pub const NTE: u64 = byte_arr_to_nr(b"nte");
+pub const TUR: u64 = byte_arr_to_nr(b"tur");
+pub const UAR: u64 = byte_arr_to_nr(b"uar");
 
-fn suffix_3byte(st: u64) -> Option<&'static [&'static [u8]]> {
-    let mat: &[&[u8]] = match st & LAST_3_BYTES {
-        MË | TË | NË => &[b"j", b"e", b""], // + "e" per shtie? but really low
-        RË => &[b"j"],
-        ËM | ËT | ËN => &[b""], // kto me ë psh do kalohen te ato qe duan 3
-        OVA | OVE | UAM | UAT | UAN | UAR => &[b"oj", b"uaj"],
-        JTA | JTE | JTI => &[b"j"],
-        NIM | NIT | NIN => &[b"j", b"", b"e"],
-        NTE => &[b"j"],
-        TUR => &[b"j", b""],
-        _ => return None,
-    };
-    Some(mat)
-}
+// fn suffix_3byte(st: u64) -> Option<&'static [&'static [u8]]> {
+//     let mat: &[&[u8]] = match st & LAST_3_BYTES {
+//         MË | TË | NË => &[b"j", b"e", b""], // + "e" per shtie? but really low
+//         RË => &[b"j"],
+//         ËM | ËT | ËN => &[b""], // kto me ë psh do kalohen te ato qe duan 3
+//         OVA | OVE | UAM | UAT | UAN | UAR => &[b"oj", b"uaj"],
+//         JTA | JTE | JTI => &[b"j"],
+//         NIM | NIT | NIN => &[b"j", b"", b"e"],
+//         NTE => &[b"j"],
+//         TUR => &[b"j", b""],
+//         _ => return None,
+//     };
+//     Some(mat)
+// }
 
 const JMË: u64 = byte_arr_to_nr("jmë".as_bytes());
 const JNË: u64 = byte_arr_to_nr("jnë".as_bytes());
@@ -273,3 +277,4 @@ fn suffix_5byte(st: u64) -> Option<&'static [&'static [u8]]> {
     };
     Some(mat)
 }
+
