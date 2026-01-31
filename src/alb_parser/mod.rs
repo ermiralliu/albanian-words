@@ -50,11 +50,6 @@ where
             (5, suffix_5byte),
         ];
 
-        // let initial_suffix = match len {
-        //     0..=2 => return None,
-        //     3..=6 => byte_arr_to_nr(&verb[2..]), // 1, 2, 3, 4 => possible lengths
-        //     7.. => byte_arr_to_nr(&verb[len - 5..]), // length 5
-        // };
         let range = match len {
             0..=2 => unsafe { std::hint::unreachable_unchecked() }, // we're checking outside the function
             3..=6 => 2..len,
@@ -64,35 +59,12 @@ where
 
         let initial_suffix = byte_arr_to_nr(&verb[range]);
 
-        // CHECKS[..if range_length <= 5 {range_length} else { 5 }].iter().find( ||)
         CHECKS[..range_length.min(5)]
             .iter()
             .rev() // Iterate from smallest to largest suffix (or vice versa depending on array order)
-            .find_map(|&(len, func)| self.possibilities_for_verb(verb, initial_suffix, len, func));
-
-        // if range_length == 5 { // here we can later move suffix_byte_len, and initial_suffix as field variables
-        //     let found = self.possibilities_for_verb(verb, initial_suffix, 5, suffix_5byte);
-        //     if found.is_some() { return found };
-        // }
-        // if range_length >= 4 {
-        //     let found = self.possibilities_for_verb(verb, initial_suffix, 4, suffix_4byte);
-        //     if found.is_some() { return found };
-        // }
-        // if range_length >= 3 {
-        //     let found = self.possibilities_for_verb(verb, initial_suffix, 3, suffix_3byte);
-        //     if found.is_some() { return found };
-        // }
-        // if range_length >= 2 {
-        //     let found = self.possibilities_for_verb(verb, initial_suffix, 2, suffix_2byte);
-        //     if found.is_some() { return found };
-        // }
-        // if range_length >= 1 {
-        //     let found = self.possibilities_for_verb(verb, initial_suffix, 1, suffix_1byte);
-        //     if found.is_some() { return found };
-        // }
-
-        None
+            .find_map(|&(len, func)| self.possibilities_for_verb(verb, initial_suffix, len, func))
     }
+
     #[inline]
     fn possibilities_for_verb(
         // this part is a little bit too much for what it's doing
