@@ -31,23 +31,26 @@ where
             base_form_len: 0,
         }
     }
+
     #[inline]
     pub fn single_verb_to_base(&mut self, verb: &[u8]) -> Option<u16> {
         // we can use copy non-overlapping if the copy below is not enough
         if verb.len() >= 32 {
+            unsafe { std::hint::unreachable_unchecked() } ;
             // I was wondering how to deal with it but yeah. Just return nothing.
             // The largest albanian word is less
-            return None;
+            // return None;
         }
         self.base_form[..verb.len()].copy_from_slice(verb);
         let len = verb.len();
         self.base_form_len = len;
-        const CHECKS: &[(usize, SuffixFunction)] = &[
-            (1, suffix_1byte),
-            (2, suffix_2byte),
-            (3, suffix_3byte),
-            (4, suffix_4byte),
-            (5, suffix_5byte),
+
+        const CHECKS: &[SuffixFunction] = &[
+            suffix_1byte,
+            suffix_2byte,
+            suffix_3byte,
+            suffix_4byte,
+            suffix_5byte,
         ];
 
         let range = match len {
@@ -57,12 +60,14 @@ where
         };
         let range_length = (&range).len();
 
-        let initial_suffix = byte_arr_to_nr(&verb[range]);
+        let initial_suffix = byte_arr_to_nr_clean(&verb[range]);
 
         CHECKS[..range_length.min(5)]
             .iter()
+            .enumerate()
             .rev() // Iterate from smallest to largest suffix (or vice versa depending on array order)
-            .find_map(|&(len, func)| self.possibilities_for_verb(verb, initial_suffix, len, func))
+            .find_map(|(i, &func)|
+                self.possibilities_for_verb(verb, initial_suffix, i+1, func))
     }
 
     #[inline]
@@ -112,10 +117,15 @@ where
 }
 
 // I initially forgot that these have to be in little endian
-const LAST_4_BYTES: u64 = 0xFFFF_FFFF_0000_0000;
-const LAST_3_BYTES: u64 = 0xFFFF_FF_0000_0000;
-const LAST_2_BYTES: u64 = 0xFFFF_0000_0000_0000;
-const LAST_BYTE: u64 = 0xFF00_0000_0000_0000;
+// const LAST_4_BYTES: u64 = 0xFFFF_FFFF_0000_0000;
+// const LAST_3_BYTES: u64 = 0xFFFF_FF00_0000_0000;
+// const LAST_2_BYTES: u64 = 0xFFFF_0000_0000_0000;
+// const LAST_BYTE: u64 = 0xFF00_0000_0000_0000;
+
+const LAST_4_BYTES: u64 = 0x0000_0000_FFFF_FFFF;
+const LAST_3_BYTES: u64 = 0x0000_0000_00FF_FFFF;
+const LAST_2_BYTES: u64 = 0x0000_0000_0000_FFFF;
+const LAST_BYTE: u64 = 0x0000_0000_0000_00FF;
 
 const fn byte_arr_to_nr(st: &[u8]) -> u64 {
     let mut s = 0u64; // Initialize 8 bytes of zeros
@@ -126,8 +136,20 @@ const fn byte_arr_to_nr(st: &[u8]) -> u64 {
         // This is a direct raw pointer copy (memcpy)
         std::ptr::copy_nonoverlapping(st.as_ptr(), dest_start, len);
     }
-    s
+    u64::from_be(s)
 }
+// #[unsafe(no_mangle)]
+fn byte_arr_to_nr_clean(st: &[u8]) -> u64 {
+    let len = st.len();
+
+    // Force 8-byte load
+    let raw = unsafe { (st.as_ptr() as *const u64).read_unaligned() };
+    // Flip to Big Endian so the first byte is the most significant
+    let big_endian = raw.swap_bytes();
+
+    big_endian >> (64 - (len * 8))
+}
+
 
 const U: u64 = byte_arr_to_nr(b"u");
 const J: u64 = byte_arr_to_nr(b"j");

@@ -2,7 +2,6 @@
 use std::{hint::unreachable_unchecked, simd::{
     Simd,
     cmp::{SimdPartialEq, SimdPartialOrd},
-    num::SimdInt,
 }};
 
 const SIMD_BYTESIZE: usize = 32;
@@ -19,7 +18,7 @@ pub mod properties;
 pub mod stop_words;
 
 use std::{
-    collections::{HashMap, HashSet},
+    collections::{HashMap},
     sync::Mutex,
     thread,
     time::Instant,
@@ -31,7 +30,7 @@ use file_readers::seq_read;
 use properties::Properties;
 use rustc_hash::FxBuildHasher;
 use std::env;
-use stop_words::STOP_WORDS;
+// use stop_words::STOP_WORDS;
 
 const DEFAULT_VEC_CAPACITY: usize = 256 * 1024;
 
@@ -94,7 +93,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
                     let mut article_tokens = Vec::with_capacity(256);
                     process_streaming(&mut local_buf, &mut|word| {
-                        if /* stop_words.contains(word) || */ word[0].is_ascii_digit() || word.len() < 3 {
+                        if /* stop_words.contains(word) || */ word[0].is_ascii_digit() || word.len() < 3 || word.len() > 32 {
                             return;
                         }
                         #[cfg(debug_assertions)]
