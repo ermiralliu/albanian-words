@@ -163,6 +163,7 @@ const E: u64 = byte_arr_to_nr(b"e");
 const I: u64 = byte_arr_to_nr(b"i");
 
 fn suffix_1byte(ch: u64) -> Option<&'static [&'static [u8]]> {
+    // CALL_COUNT_1.fetch_add(1, Ordering::Relaxed);
     // For now, I'm keeping it simple with
     // static lifetimes
     let final_byte = ch & LAST_BYTE;
@@ -193,6 +194,7 @@ const RI: u64 = byte_arr_to_nr(b"ri");
 const UR: u64 = byte_arr_to_nr(b"ur");
 
 fn suffix_2byte(st: u64) -> Option<&'static [&'static [u8]]> {
+    // CALL_COUNT_2.fetch_add(1, Ordering::Relaxed);
     // only the last two elements of the string are passed
     let mat: &[&[u8]] = match st & LAST_2_BYTES {
         // this one needed explicit coercion
@@ -257,6 +259,7 @@ const TËT: u64 = byte_arr_to_nr("tët".as_bytes());
 const TËN: u64 = byte_arr_to_nr("tën".as_bytes());
 
 fn suffix_4byte(st: u64) -> Option<&'static [&'static [u8]]> {
+    // CALL_COUNT_4.fetch_add(1, Ordering::Relaxed);
     let mat: &[&[u8]] = match st & LAST_4_BYTES {
         JMË | JNË => &[b"j"],
         TËM | TËT | TËN => &[b"j", b""],
@@ -271,6 +274,7 @@ const JTËN: u64 = byte_arr_to_nr("jtën".as_bytes());
 const JTUR: u64 = byte_arr_to_nr("jtur".as_bytes());
 
 fn suffix_5byte(st: u64) -> Option<&'static [&'static [u8]]> {
+    // CALL_COUNT_5.fetch_add(1, Ordering::Relaxed);
     let mat: &[&[u8]] = match st {
         JTËM | JTËT | JTËN | JTUR => &[b"j"],
         _ => return None,

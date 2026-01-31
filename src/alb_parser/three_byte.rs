@@ -4,6 +4,8 @@ pub const J_EM_ARR: &[&[u8]] = &[b"j", b""];
 pub const EMPTY_ARR: &[&[u8]] = &[b""];
 pub const OJ_UAJ_ARR: &[&[u8]] = &[b"oj", b"uaj"];
 
+// use std::sync::atomic::Ordering;
+
 use crate::alb_parser::*;
 
 const SUFFIXES: &[u64] = &[
@@ -108,6 +110,7 @@ pub const SUFFIX_LOOKUP: LookupTable = {
 // #[inline]
 // #[unsafe(no_mangle)]
 pub fn suffix_3byte_final(st: u64) -> Option<&'static [&'static [u8]]> {
+    // CALL_COUNT_3.fetch_add(1, Ordering::Relaxed);
     const LAST_3_BYTES: u64 = 0x0000_0000_00FF_FFFF;
     let st = st & LAST_3_BYTES;
     let index = st.wrapping_mul(MAGIC_MUL) >> 20;

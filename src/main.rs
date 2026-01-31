@@ -10,6 +10,12 @@ const _SIMD_BITSIZE: usize = SIMD_BYTESIZE * 8;
 
 type SimdHere = Simd<u8, SIMD_BYTESIZE>;
 // type ProcessWordFn = fn(&[u8]) -> ();
+// use std::sync::atomic::{AtomicU64, Ordering};
+// pub static CALL_COUNT_1: AtomicU64 = AtomicU64::new(0);
+// pub static CALL_COUNT_2: AtomicU64 = AtomicU64::new(0);
+// pub static CALL_COUNT_3: AtomicU64 = AtomicU64::new(0);
+// pub static CALL_COUNT_4: AtomicU64 = AtomicU64::new(0);
+// pub static CALL_COUNT_5: AtomicU64 = AtomicU64::new(0);
 
 pub mod alb_parser;
 pub mod bitset;
@@ -121,6 +127,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let end = Instant::now();
     println!("{:?}", final_tokens[final_tokens.len() - 1]);
     println!("Time passed: {:?}", (end - start));
+    // println!("{:?}, {:?}, {:?}, {:?}, {:?}", CALL_COUNT_1, CALL_COUNT_2, CALL_COUNT_3, CALL_COUNT_4, CALL_COUNT_5);
     Ok(())
 }
 
