@@ -26,7 +26,7 @@ impl SequentialFileReader {
         if bytes_read == 0 {
             return false;
         }
-        buf.truncate(buf.len()-1);
+        // buf.truncate(buf.len()-1);
 
         return true;
     }
