@@ -1,7 +1,6 @@
 #![feature(portable_simd)]
-use std::{hint::unreachable_unchecked, simd::{
+use std::{ simd::{
     Simd,
-    cmp::{SimdPartialEq, SimdPartialOrd},
 }};
 
 const SIMD_BYTESIZE: usize = 32;
@@ -101,7 +100,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
                     let mut article_tokens = Vec::with_capacity(256);
                     process_streaming_new(&mut local_buf, &mut|word| {
-                        if /* stop_words.contains(word) || */ word[0].is_ascii_digit() || word.len() < 3 || word.len() > 32 {
+                        if /* stop_words.contains(word) || */ word[0].is_ascii_digit() || word.len() < 3 || word.len() >= 32 {
                             return;
                         }
                         #[cfg(debug_assertions)]

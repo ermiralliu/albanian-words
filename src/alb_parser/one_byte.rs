@@ -16,7 +16,7 @@ enum OneByteOptions {
     EmptyArr= 3
 }
 
-const ONE_BYTE_LOOKUP: [OneByteOptions; 32] = {
+/* const ONE_BYTE_LOOKUP: [OneByteOptions; 32] = {
     let mut arr = [OneByteOptions::None; 32];
     const FLOOR: usize = 97;
     arr[U-FLOOR] = OneByteOptions::JEmArr;
@@ -26,7 +26,7 @@ const ONE_BYTE_LOOKUP: [OneByteOptions; 32] = {
     arr[E-FLOOR] = OneByteOptions::EmptyArr;
     arr[I-FLOOR] = OneByteOptions::EmptyArr;
     arr
-};
+}; */
 
 const ONE_BYTE_LOOKUP_BITSET: u64 = {
     const FLOOR: usize = 97;
