@@ -26,17 +26,13 @@ impl SequentialFileReader {
             return false;
         }
         // buf.truncate(buf.len()-1);
-        let remainder = buf.len() % LANESIZE; // this was % SIMD_BYTESIZE at first
+        let len = buf.len();
+        let remainder = len % LANESIZE;
+
         if remainder != 0 {
             let padding_needed = LANESIZE - remainder;
-
-            // Ensure we have space for the padding.
-            // If len + padding > capacity, this handles the growth.
-            if buf.capacity() - buf.len() < padding_needed {
-                buf.reserve(padding_needed);
-            }
-
-            buf.extend(std::iter::repeat(0).take(padding_needed));
+            // 4. Use resize for idiomatic padding
+            buf.resize(len + padding_needed, 0);
         }
 
         return true;
