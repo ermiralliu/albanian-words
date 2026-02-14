@@ -40,9 +40,9 @@ pub fn single_verb_to_base_ultra(fst: &Fst<&[u8]>, verb: &[u8], stack: &mut Vec<
 /// A state representing a position in the search logic.
 #[derive(Clone, Copy)]
 pub struct SearchState {
-    node_addr: usize, // The raw address of the FST node
-    input_idx: usize, // Current index in the input string
-    output: Output,   // Accumulated value so far
+    pub(crate) node_addr: usize, // The raw address of the FST node
+    pub(crate) input_idx: usize, // Current index in the input string
+    pub(crate) output: Output,   // Accumulated value so far
 }
 
 fn find_longest_match_with_rules(

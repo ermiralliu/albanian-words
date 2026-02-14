@@ -54,6 +54,21 @@ fn main() {
         builder.insert(word, id).unwrap();
     }
     builder.finish().unwrap();
+    
+
+    let category_file_vocab = "categories4.txt";
+    let category_content =
+        fs::read_to_string(category_file_vocab).expect("where is it?");
+    let dest_path = Path::new(&out_dir).join("categories.bin");
+    let fst_file = BufWriter::new(File::create(&dest_path).unwrap());
+    let mut builder = fst::MapBuilder::new(fst_file).unwrap();
+    for (word, id) in category_content.split('\n').enumerate().map( |x| {
+        let trimmed_word = x.1.trim_matches( |ch: char| !ch.is_alphanumeric());
+        (trimmed_word, x.0)
+    }) {
+        builder.insert(word, id as u64).unwrap();
+    }
+    builder.finish().unwrap();
 
     println!("cargo:rerun-if-changed={}", vocab_file_path);
     println!("cargo:rerun-if-changed=build.rs");

@@ -1,4 +1,5 @@
 #![feature(portable_simd)]
+use std::io::{BufRead, Write};
 use std::simd::Simd;
 
 const SIMD_BYTESIZE: usize = 32;
@@ -17,11 +18,12 @@ type SimdHere = Simd<u8, SIMD_BYTESIZE>;
 // pub mod alb_parser;
 pub mod alb_parser_imprv;
 pub mod bitset;
+pub mod categories;
 pub mod file_readers;
 pub mod properties;
 pub mod stop_words;
 
-use std::{sync::Mutex, thread, time::Instant, vec};
+use std::{fs::File, sync::Mutex, thread, time::Instant, vec};
 
 use file_readers::seq_read;
 use fst::raw::Fst;
@@ -29,20 +31,15 @@ use properties::Properties;
 use std::env;
 
 use crate::bitset::process_streaming_new;
+use crate::categories::{get_category_id, get_id_fuzzy};
 // use stop_words::STOP_WORDS;
 
 const DEFAULT_VEC_CAPACITY: usize = 256 * 1024;
 pub const FST_DATA: &'static [u8] = include_bytes!(concat!(env!("CARGO_MANIFEST_DIR"), "/data/", "dictionary.bin"));
+pub const FST_CATEGORIES: &'static [u8] =
+    include_bytes!(concat!(env!("CARGO_MANIFEST_DIR"), "/data/", "categories.bin"));
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
-    // println!("Hello, world!");
-    // let verbs = vec!["punojmë", "punuam", "shkruar", "lexuar", "vendosur"];
-    // let vocab_vector: Vec<&[u8]> = vec![b"punoj", b"shkruaj", b"lexoj", b"vendos"]; // this is just for tests,
-    // let mut map: HashMap<&[u8], u16, FxBuildHasher> = HashMap::default();
-    // let map = fst::Map::new(FST_DATA).unwrap();
-    // for (i, &word) in vocab_vector.iter().enumerate() {
-    //     map.insert(word, i as u16);
-    // }
     let config = {
         let config_file = env::var("CONFIG_FILE").unwrap_or("./config.ini".to_string());
         match Properties::try_from_config_file(&config_file) {
@@ -58,6 +55,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let start = Instant::now();
 
     let sr = seq_read::SequentialFileReader::try_new(&config.article_file, config.article_separator)?;
+    let sr_categories = seq_read::SequentialFileReader::try_new(&config.category_file, config.category_list_boundary)?;
     // let mut count = 0;
     // let set: HashSet<&[u8]> = STOP_WORDS.iter().copied().map(|word| word.as_bytes()).collect();
 
@@ -65,26 +63,34 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     // These live on the stack of main
     let shared_reader = Mutex::new(sr);
+    let shared_reader_categories = Mutex::new(sr_categories);
     // 'set' and 'parser' can just be regular references
     let core_count = num_cpus::get_physical();
     // let core_count = 1;
 
     let fst = Fst::new(FST_DATA).expect("The vocabulary has not been built successfully");
-    let final_tokens: Vec<Vec<u16>> = thread::scope(|s| {
+    let fst_categories =
+        Fst::new(FST_CATEGORIES).expect("Categories State Machine hasn't been built successfully");
+    let final_tokens: (Vec<Vec<u16>>, Vec<Vec<u16>>) = thread::scope(|s| {
         let mut handles = vec![];
         let scoped_fst = &fst;
+        let scoped_fst_categories = &fst_categories;
 
         for _ in 0..core_count {
             // We borrow from the outer scope
             let r = &shared_reader;
+            let r_categories = &shared_reader_categories;
             // let stop_words = &set;
 
             let h = s.spawn(move || {
                 let mut local_buf = Vec::with_capacity(DEFAULT_VEC_CAPACITY);
+                let mut local_category_buf = Vec::with_capacity(64);
                 let mut thread_results = Vec::with_capacity(128);
+                let mut thread_category_results: Vec<Vec<u16>> = Vec::with_capacity(8);
                 let local_fst_ref = scoped_fst;
 
                 let mut stack = Vec::new();
+                let mut category_stack = Vec::new();
 
                 loop {
                     local_buf.clear();
@@ -125,150 +131,115 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                         }
                     });
 
+                    local_category_buf.clear();
+                    {
+                        let mut reader = r_categories.lock().unwrap();
+                        if !reader.read_into(&mut local_category_buf) {
+                            break;
+                        }
+                    }
+
                     if !article_tokens.is_empty() {
                         thread_results.push(article_tokens);
+                    } else {
+                        continue;
                     }
+                    // article_categories
+                    thread_category_results.push(
+                        local_category_buf
+                            .as_slice()
+                            .split(|x| *x == config.category_entry_separator)
+                            .map(|cate| get_category_id(scoped_fst_categories, cate, &mut category_stack))
+                            .flatten()
+                            .collect(),
+                    );
+                    // for cat in local_category_buf.as_slice().split(|x| *x == config.category_entry_separator) {
+                    //     if let Some(cate) = get_id_fuzzy(scoped_fst_categories, cat){
+                    //        thread_category_results.push(cate);
+                    //     }
+                    // }
                 }
-                thread_results
+                (thread_results, thread_category_results)
             });
             handles.push(h);
         }
 
         // Join is automatic at the end of the scope, but we collect results here
-        handles.into_iter().flat_map(|h| h.join().unwrap()).collect()
+        // handles.into_iter().flat_map(|h| h.join().unwrap()).collect()
+        // handles.into_iter().flat_map(|h| h.join().unwrap()).unzip()
+        // let (nested_results, nested_categories): (Vec<Vec<Vec<u16>>>, Vec<Vec<Vec<u16>>>) = handles
+        //     .into_iter()
+        //     .map(|h| h.join().unwrap()) // Map to the tuple
+        //     .unzip(); // Split into two vectors of vectors
+
+        // // Flatten the nesting created by the threads
+        // let final_results: Vec<Vec<u16>> = nested_results.into_iter().flatten().collect();
+        // let final_categories: Vec<Vec<u16>> = nested_categories.into_iter().flatten().collect();
+        handles
+            .into_iter()
+            .flat_map(|h| {
+                let (tokens, cats) = h.join().unwrap();
+                // This is the "magic" step you were missing:
+                // Convert ([T], [C]) -> Iterator<(T, C)>
+                tokens.into_iter().zip(cats)
+            })
+            .unzip() // Now collects Iterator<(T, C)> -> ([T], [C]))
+        // (final_results, final_categories)
     });
 
     let end = Instant::now();
-    let final_val = &final_tokens[final_tokens.len() - 1];
+    let final_val = &final_tokens.0[final_tokens.0.len() - 1];
+    let final_cat = &final_tokens.1[final_tokens.1.len() -1 ];
     println!("{:?}", final_val);
-    for el in final_val.iter().map(|x| {
-        if *x  == 0 {
+    for el in final_val.iter().map(|x,| {
+        if *x == 0 {
             return Some(Vec::from(b"Not found"));
         } else if *x == 1 {
             return Some(Vec::from(b"Number"));
         }
-        return fst.get_key(*x as u64 -2 )
-
+        return fst.get_key(*x as u64 - 2);
+    }) {
+        if let Some(val) = el {
+            print!("{:?},", std::str::from_utf8(val.as_slice()).unwrap());
+        }
     }
-        ) {
+    for el in final_cat.iter().map(|x,| {
+        return fst_categories.get_key(*x as u64);
+    }) {
         if let Some(val) = el {
             print!("{:?},", std::str::from_utf8(val.as_slice()).unwrap());
         }
     }
     println!("Time passed: {:?}", (end - start));
     // println!("{:?}, {:?}, {:?}, {:?}, {:?}", CALL_COUNT_1, CALL_COUNT_2, CALL_COUNT_3, CALL_COUNT_4, CALL_COUNT_5);
+    save_to_file(final_tokens.0, "out/albanian_test.rkyv")?;
+    save_to_file(final_tokens.1, "out/albanian_test_categories.rkyv")?;
     Ok(())
 }
 
-// #[inline(always)]
-// #[target_feature(enable = "avx2")]
-// fn process_chunk(slic: &mut [u8], prev_ends_with_c3: u64) -> (u64, u64) {
-//     // 16 byte
-//     if slic.len() != SIMD_BYTESIZE {
-//         unsafe { unreachable_unchecked(); }
-//     }
-//     const SIMD_BYTESIZE_SHIFT: usize = SIMD_BYTESIZE -1;
-//
-//     let chunk = SimdHere::from_slice(slic);
-//     // 1. Mark 0xC3 early
-//     let is_c3 = chunk.simd_eq(SimdHere::splat(0xC3));
-//     let c3_mask = is_c3.to_bitmask();
-//     let is_last_c3 = c3_mask >> SIMD_BYTESIZE_SHIFT; // this is not used. it's returned. We only use the previous one
-//                                                       //
-//     // 2. Transform the chunk: OR 0x20 everywhere except 0xC3 lanes
-//     let lower_hack = chunk | SimdHere::splat(0x20);
-//     let transformed = is_c3.select(chunk, lower_hack); // Uses vector blend, much faster than casting masks
-//
-//     // let not_c3_mask = !is_c3;
-//     // let or_vec = not_c3_mask.to_int().cast::<u8>() & SimdHere::splat(0x20);
-//     // let transformed = chunk | or_vec;
-//
-//     // 3. Range check the ALREADY transformed data
-//     let is_digit = transformed.simd_ge(SimdHere::splat(b'0')) & transformed.simd_le(SimdHere::splat(b'9'));
-//     let is_alpha = transformed.simd_ge(SimdHere::splat(b'a')) & transformed.simd_le(SimdHere::splat(b'z'));
-//
-//     let is_alnum = is_digit | is_alpha;
-//
-//     // 4. Build the valid_mask
-//     let valid_mask = is_alnum.to_bitmask() | c3_mask | (c3_mask << 1) | prev_ends_with_c3 as u64;
-//
-//     // 5. Write back the transformed data
-//     transformed.copy_to_slice(&mut slic[0..SIMD_BYTESIZE]);
-//
-//     (valid_mask, is_last_c3)
-// }
-//
-//
-// // #[inline(always)]
-// fn process_streaming<F>(slic: &mut [u8], process_word: &mut F) where
-//     F: FnMut(&[u8]){
-//     let mut word_start = Option::None;
-//
-//     let num_full_chunks = slic.len() / SIMD_BYTESIZE;
-//     let mut ends_with_c3 = 0; // this is basically a boolean, but we don't want to pay for that
-//
-//     for chunk_idx in 0..num_full_chunks {
-//         let chunk_start = chunk_idx * SIMD_BYTESIZE;
-//         let chunk = &mut slic[chunk_start..chunk_start + SIMD_BYTESIZE];
-//
-//         let (mask, ends_with) = unsafe { process_chunk(chunk, ends_with_c3) };
-//         ends_with_c3 = ends_with;
-//         read_word_from_bitset(mask, chunk_start, slic, &mut word_start, process_word);
-//     }
-//
-//     let mut buffer = [0u8; SIMD_BYTESIZE]; // Pre-filled with 0s
-//
-//     let last_chunk_start = num_full_chunks * SIMD_BYTESIZE;
-//     let last_chunk = &slic[last_chunk_start..];
-//     // Copy small_data into the beginning of the buffer
-//     assert!(last_chunk.len() < SIMD_BYTESIZE);
-//     if last_chunk.len() >= SIMD_BYTESIZE {
-//         unsafe { unreachable_unchecked(); }
-//     }
-//     buffer[..last_chunk.len()].copy_from_slice(last_chunk);
-//     let mask = unsafe { process_chunk(&mut buffer, ends_with_c3) };
-//     read_word_from_bitset(mask.0, last_chunk_start, slic, &mut word_start, process_word);
-// }
-//
-// // #[inline(always)]
-// fn read_word_from_bitset<F>(
-//     mut mask: u64,
-//     chunk_start: usize,
-//     slic: &[u8],
-//     word_start: &mut Option<usize>,
-//     process_word: &mut F
-// ) where
-//     F: FnMut(&[u8]){
-//     const MASK_NEG_BITS: u64 = (1 << SIMD_BYTESIZE) - 1;
-//     let mut neg_mask = (!mask) & MASK_NEG_BITS;
-//
-//     loop {
-//         // 1. Determine the mask
-//         let (active_mask, other_mask) = match word_start {
-//             Some(_) => (&mut neg_mask, &mut mask),
-//             None => (&mut mask, &mut neg_mask),
-//         };
-//
-//         // 2. Find the transition
-//         let idx = active_mask.trailing_zeros() as usize;
-//         if idx >= SIMD_BYTESIZE {
-//             return;
-//         }
-//
-//         // 3. Action based on state
-//         if let Some(st) = *word_start {
-//             let word = unsafe { slic.get_unchecked(st..chunk_start + idx) };
-//             process_word(word);
-//             *word_start = None;
-//         } else {
-//             *word_start = Some(chunk_start + idx);
-//         }
-//
-//         *other_mask &= zero_everything_before(idx);
-//     }
-// }
-//
-// #[inline(always)]
-// fn zero_everything_before(idx: usize) -> u64 {
-//     return !((1 << (idx + 1)) - 1);
-// }
+use rkyv::{Archive, Deserialize, Serialize};
+
+#[derive(Archive, Deserialize, Serialize, Debug, PartialEq)]
+#[rkyv(
+    // This will generate a PartialEq impl between archived and normal types
+    compare(PartialEq),
+    // bytecheck can be used to validate your data if you want
+    derive(Debug),
+)]
+struct Data {
+    matrix: Vec<Vec<u16>>,
+}
+
+// Efficiently save to disk
+pub fn save_to_file(matrix: Vec<Vec<u16>>, path: &str) -> Result<(), Box<dyn std::error::Error>> {
+    // Serialize to bytes
+    let data = Data { matrix };
+    let bytes = rkyv::to_bytes::<rkyv::rancor::Error>(&data)?;
+
+    // Write to file
+    let mut file = File::create(path)?;
+    file.write_all(&bytes)?;
+
+    println!("Data written successfully!");
+    Ok(())
+}
