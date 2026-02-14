@@ -6,3 +6,7 @@ edition = "2024"
 [dependencies]
 num_cpus = "1.17.0"
 rustc-hash = "2.1.1"
+fst = "0.4.7"
+
+[build-dependencies]
+fst = "0.4.7"

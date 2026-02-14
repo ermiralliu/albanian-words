@@ -1,0 +1,97 @@
+use fst::{IntoLister, Streamer};
+
+// 1. Create a range search for the base verb
+// This jumps to the "base" once and then looks at what's under it
+let mut stream = self.vocab
+    .range()
+    .ge(base_part) // Greater than or equal to "walk"
+    .le(base_part_plus_one) // Less than "wall" (effectively a prefix filter)
+    .into_stream();
+
+while let Some((key, value)) = stream.next() {
+    // Now you just check if the 'key' matches any of your suffixes
+    // This is much faster because the FST is doing the heavy lifting 
+    // of walking the tree only once.
+}
+
+
+Actually, you’ve hit on a brilliant architectural pivot. If you want to strip suffixes and find the "base" ID, you are effectively performing **Reverse Morphological Analysis**.
+
+If your FST only contains base words (e.g., "walk"), but your input is "walking", you can’t "walk backwards" through a standard FST because the bytes `i-n-g` simply aren't there.
+
+However, you **can** implement an Automaton that acts as a "Suffix-Stripping Matcher." Instead of the FST matching the whole string, the Automaton logic says: *"Match the first  bytes exactly as they appear in the FST, and then pretend the string ended, even if there are trailing bytes (the suffix)."*
+
+### The "Base Word" Automaton
+
+Instead of checking every suffix, you create an Automaton that:
+
+1. Walks the FST using the input string.
+2. At **every** state that is "Final" in the FST, it checks if the *remaining* bytes in your input string match one of your valid suffixes.
+
+### Implementation: The `PrefixOf` Automaton
+
+The `fst` crate doesn't have a "SuffixStripper" out of the box, but you can build one by wrapping the existing `Str` matcher.
+
+```rust
+use fst::{Automaton, IntoLister, Streamer};
+
+struct SuffixStripper<'a> {
+    input: &'a [u8],
+    suffixes: &'a [&'a [u8]],
+}
+
+impl<'a> Automaton for SuffixStripper<'a> {
+    type State = usize; // Current index in self.input
+
+    fn start(&self) -> Self::State { 0 }
+
+    fn accept(&self, state: &Self::State) -> bool {
+        let remaining = &self.input[*state..];
+        // If the FST reaches a final state here, is the rest of the 
+        // input a valid suffix? (Including an empty suffix for exact match)
+        remaining.is_empty() || self.suffixes.contains(&remaining)
+    }
+
+    fn can_match(&self, state: &Self::State) -> bool {
+        *state < self.input.len()
+    }
+
+    fn next(&self, state: &Self::State, byte: u8) -> Self::State {
+        if *state < self.input.len() && self.input[*state] == byte {
+            state + 1
+        } else {
+            // This path in the FST doesn't match our input string
+            usize::MAX 
+        }
+    }
+}
+
+```
+
+### Why this is the "Ultimate" Optimization
+
+1. **Single Pass:** You walk the FST **exactly once** for the length of the verb.
+2. **No Loops:** You don't iterate over suffixes. The `accept` function only runs when the FST finds a potential base word.
+3. **Dictionary Size:** As you noted, your FST stays tiny because it only stores the lemmas (roots), not every conjugated form.
+
+### How to use it:
+
+```rust
+let matcher = SuffixStripper {
+    input: b"walking",
+    suffixes: &[b"ing", b"ed", b"s"],
+};
+
+let mut stream = self.vocab.search(matcher).into_stream();
+
+if let Some((_key, value)) = stream.next() {
+    return Some(value as u16);
+}
+
+```
+
+### Why this is faster than your original code:
+
+In your original code, if you had 10 suffixes, you did 10 lookups. With this Automaton, if "walk" is the only word in your dictionary starting with "w", the FST will follow that single path. When it hits the 'k', the `accept()` method will look at the remaining bytes ("ing"), see it's in your suffix list, and **boom**—you have your ID.
+
+**Would you like me to help you refine the `accept` logic to handle the "longest match" (e.g., distinguishing between "surf" and "surfing" if both are in the vocab)?**

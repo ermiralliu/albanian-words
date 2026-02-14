@@ -14,3 +14,5 @@ my_app_run.data.third
 config.ini
 
 s25flags.txt
+
+/data/*

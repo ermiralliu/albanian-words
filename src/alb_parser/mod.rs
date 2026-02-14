@@ -1,8 +1,19 @@
-use std::{collections::HashMap, hash::BuildHasher, hint::unreachable_unchecked};
+// use std::{collections::HashMap, hash::BuildHasher, hint::unreachable_unchecked};
 
-use crate::alb_parser::{one_byte::suffix_1byte_new, three_byte::{J_EM_ARR, suffix_3byte_final}};
-pub mod three_byte;
+use fst::{
+    Map,
+    raw::{Fst, Output},
+};
+
+use crate::{
+    FST_DATA,
+    alb_parser::{
+        one_byte::suffix_1byte_new,
+        three_byte::{J_EM_ARR, suffix_3byte_final},
+    },
+};
 pub mod one_byte;
+pub mod three_byte;
 // use unicode_normalization::UnicodeNormalization;
 
 // type SuffixFunction = fn(&str) -> Option<&[&str]>;
@@ -13,27 +24,28 @@ type SuffixFunction = fn(u64) -> Option<&'static [&'static [u8]]>;
 const DEFAULT_WORD_BUFFER_CAPACITY: usize = 32; // Increased this size only because of some
 // retarded articles
 
-pub struct AlbanianParser<'a, K>
-where
-    K: BuildHasher,
-{
-    vocab: &'a HashMap<&'a [u8], u16, K>,
+pub struct AlbanianParser<'a> {
+    vocab: &'a Map<&'a [u8]>,
     // normalization_buffer: String, // after normalizing ë and ç
     // main_buffer: String,          // after lowercasing the normalization buffer
     base_form: [u8; DEFAULT_WORD_BUFFER_CAPACITY], // after lowercasing the normalization buffer
     base_form_len: usize,
+    pub fst: Fst<&'a [u8]>,
 }
 
-impl<'a, K> AlbanianParser<'a, K>
-where
-    K: BuildHasher + Default,
-{
-    pub fn new(vocab: &'a HashMap<&'a [u8], u16, K>) -> AlbanianParser<'a, K> {
+impl<'a> AlbanianParser<'a> {
+    pub fn new(vocab: &'a Map<&'a [u8]>) -> AlbanianParser<'a> {
         AlbanianParser {
             vocab,
             base_form: [0u8; DEFAULT_WORD_BUFFER_CAPACITY],
             base_form_len: 0,
+            fst: Fst::new(FST_DATA).unwrap(),
         }
+    }
+
+    pub fn single_verb_to_base_new(&mut self, verb: &[u8]) -> Option<u16> {
+        let val = find_longest_match(&self.fst, verb);
+        val.map(|(id, _len)| id as u16)
     }
 
     #[inline]
@@ -44,6 +56,9 @@ where
             // I was wondering how to deal with it but yeah. Just return nothing.
             // The largest albanian word is less
             // return None;
+        }
+        if let Some(end) = self.vocab.get(verb) {
+            return Some(end as u16);
         }
         self.base_form[..verb.len()].copy_from_slice(verb);
         let len = verb.len();
@@ -72,7 +87,7 @@ where
             .iter()
             .enumerate()
             .rev() // Iterate from smallest to largest suffix (or vice versa depending on array order)
-            .find_map(|(i, &func)| self.possibilities_for_verb(verb, initial_suffix, i + 1, func))
+            .find_map(|(i, &func)| self.possibilities_for_verb_new(verb, initial_suffix, i + 1, func))
     }
 
     #[inline]
@@ -109,7 +124,7 @@ where
 
                     // 3. Lookup in vocab using a slice of the array
                     if let Some(matching_word) = self.vocab.get(&self.base_form[..current_total_len]) {
-                        return Some(*matching_word);
+                        return Some(matching_word as u16);
                     }
 
                     // Note: We don't need to "reset" the buffer inside the loop because
@@ -118,6 +133,72 @@ where
             }
         }
         None
+    }
+
+    fn possibilities_for_verb_new(
+        &mut self,
+        verb: &[u8],
+        initial_suffix: u64,
+        suffix_byte_len: usize,
+        suffix_function: SuffixFunction,
+    ) -> Option<u16> {
+        if verb.len() < suffix_byte_len {
+            return None;
+        }
+
+        let suffix_offset = verb.len() - suffix_byte_len;
+        let base_part = &verb[..suffix_offset];
+
+        // 1. Traverse to the end of the common base once
+        let fst = self.vocab.as_fst();
+        let mut node = fst.root();
+
+        for &byte in base_part {
+            if let Some(transition_index) = node.find_input(byte) {
+                node = fst.node(node.transition(transition_index).addr);
+            } else {
+                // Base doesn't even exist in the FST
+                return None;
+            }
+        } // 1. Get the state for the verb "root" (e.g., "walk")
+
+        // 2. Try the suffixes from this saved node
+        if let Some(possibilities) = suffix_function(initial_suffix) {
+            for el_bytes in possibilities {
+                if let Some(value) = self.check_suffix_from_node(fst, node, el_bytes) {
+                    return Some(value as u16);
+                }
+            }
+        }
+
+        None
+    }
+
+    /// Helper to finish the traversal from a specific FST state
+    fn check_suffix_from_node(
+        &self,
+        fst: &fst::raw::Fst<&[u8]>,
+        start_node: fst::raw::Node,
+        suffix: &[u8],
+    ) -> Option<u64> {
+        let mut node = start_node;
+        let mut output = 0; // FSTs accumulate values along the path
+
+        for &byte in suffix {
+            if let Some(transition_index) = node.find_input(byte) {
+                let transition = node.transition(transition_index);
+                output += transition.out.value(); // Accumulate the transition weight
+                node = fst.node(transition.addr);
+            } else {
+                return None;
+            }
+        }
+
+        if node.is_final() {
+            Some(output + node.final_output().value())
+        } else {
+            None
+        }
     }
 }
 
@@ -170,17 +251,17 @@ fn suffix_1byte(ch: u64) -> Option<&'static [&'static [u8]]> {
     let final_byte = ch & LAST_BYTE;
     match final_byte % 4 {
         0 if matches!(final_byte, J | N) => {
-            return Some(unsafe { j_em_arr.get_unchecked(2..=2)});
+            return Some(unsafe { j_em_arr.get_unchecked(2..=2) });
         }
         1 => {
             if final_byte >= 97 && final_byte <= 105 {
-                return Some(unsafe { j_em_arr.get_unchecked(2..=2)});
+                return Some(unsafe { j_em_arr.get_unchecked(2..=2) });
             } else if final_byte == U {
                 return Some(j_em_arr);
             }
         }
         2 | 3 => return None,
-        _ => unsafe { unreachable_unchecked() },
+        _ => unsafe { std::hint::unreachable_unchecked() },
     }
     None
     // if final_byte % 4 == 0 && matches!(final_byte, J|N) {
@@ -299,4 +380,34 @@ fn suffix_5byte(st: u64) -> Option<&'static [&'static [u8]]> {
         _ => return None,
     };
     Some(mat)
+}
+
+fn find_longest_match(fst: &Fst<&[u8]>, input: &[u8]) -> Option<(usize, usize)> {
+    let mut node = fst.root();
+    let mut out = Output::zero();
+    let mut last_found = None;
+
+    for (i, &byte) in input.iter().enumerate() {
+        // Find the specific transition for this byte
+        if let Some(index) = node.find_input(byte) {
+            let transition = node.transition(index);
+            // Accumulate the value along the path
+            out = out.cat(transition.out);
+            // Move to the next state (node)
+            node = fst.node(transition.addr);
+
+            if node.is_final() {
+                // Total value = path values + the final state's weight
+                let final_id = out.cat(node.final_output()).value() as usize;
+                last_found = Some((final_id, i + 1));
+            }
+        // }
+        // else if is_vowel(byte) {
+        //     // Vowel dropping: Skip the input byte, stay in the current node
+        //     continue;
+        } else {
+            break;
+        }
+    }
+    last_found
 }

@@ -21,9 +21,9 @@ pub mod bitset;
 pub mod file_readers;
 pub mod properties;
 pub mod stop_words;
+pub mod alb_parser_imprv;
 
 use std::{
-    collections::{HashMap},
     sync::Mutex,
     thread,
     time::Instant,
@@ -32,23 +32,26 @@ use std::{
 
 use alb_parser::AlbanianParser;
 use file_readers::seq_read;
+use fst::raw::Fst;
 use properties::Properties;
-use rustc_hash::FxBuildHasher;
 use std::env;
 
 use crate::bitset::process_streaming_new;
 // use stop_words::STOP_WORDS;
 
 const DEFAULT_VEC_CAPACITY: usize = 256 * 1024;
+pub const FST_DATA: &'static [u8] = 
+    include_bytes!(concat!(env!("CARGO_MANIFEST_DIR"), "/data/", "dictionary.bin"));
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
-    println!("Hello, world!");
+    // println!("Hello, world!");
     // let verbs = vec!["punojmë", "punuam", "shkruar", "lexuar", "vendosur"];
-    let vocab_vector: Vec<&[u8]> = vec![b"punoj", b"shkruaj", b"lexoj", b"vendos"]; // this is just for tests,
-    let mut map: HashMap<&[u8], u16, FxBuildHasher> = HashMap::default();
-    for (i, &word) in vocab_vector.iter().enumerate() {
-        map.insert(word, i as u16);
-    }
+    // let vocab_vector: Vec<&[u8]> = vec![b"punoj", b"shkruaj", b"lexoj", b"vendos"]; // this is just for tests,
+    // let mut map: HashMap<&[u8], u16, FxBuildHasher> = HashMap::default();
+    // let map = fst::Map::new(FST_DATA).unwrap();
+    // for (i, &word) in vocab_vector.iter().enumerate() {
+    //     map.insert(word, i as u16);
+    // }
     let config = {
         let config_file = env::var("CONFIG_FILE").unwrap_or("./config.ini".to_string());
         match Properties::try_from_config_file(&config_file) {
@@ -60,6 +63,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         }
     };
     println!("Config information: {:#?}", config);
+
 
     let start = Instant::now();
 
@@ -75,18 +79,20 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let core_count = num_cpus::get_physical();
     // let core_count = 1; 
 
+    let fst = Fst::new(FST_DATA).expect("The vocabulary has not been built successfully");
     let final_tokens: Vec<Vec<u16>> = thread::scope(|s| {
         let mut handles = vec![];
+        let scoped_fst = &fst;
 
         for _ in 0..core_count {
             // We borrow from the outer scope
             let r = &shared_reader;
             // let stop_words = &set;
-            let mut local_parser: AlbanianParser<'_, FxBuildHasher> = AlbanianParser::new(&map);
 
             let h = s.spawn(move || {
                 let mut local_buf = Vec::with_capacity(DEFAULT_VEC_CAPACITY);
                 let mut thread_results = Vec::with_capacity(128);
+                let local_fst_ref = scoped_fst;
 
                 loop {
                     local_buf.clear();
@@ -108,8 +114,11 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                             let printable_word = unsafe {std::str::from_utf8_unchecked(word)};
                             println!("Word: {}", printable_word);
                         }
-                        let id = local_parser.single_verb_to_base(word);
-                        article_tokens.push(id.unwrap_or(0));
+                        // let id = local_parser.single_verb_to_base_new(word);
+                        let id = alb_parser_imprv::single_verb_to_base_new(local_fst_ref, word);
+                        if let Some(id_num) = id {
+                            article_tokens.push(id_num);
+                        }
                     });
 
                     if !article_tokens.is_empty() {
@@ -126,7 +135,11 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     });
 
     let end = Instant::now();
-    println!("{:?}", final_tokens[final_tokens.len() - 1]);
+    let final_val = &final_tokens[final_tokens.len()-1];
+    println!("{:?}", final_val);
+    for el in final_val.iter().map(|x| fst.get_key(*x as u64)) {
+        if let Some(val) = el { print!("{:?},", std::str::from_utf8(val.as_slice()).unwrap());}
+    }
     println!("Time passed: {:?}", (end - start));
     // println!("{:?}, {:?}, {:?}, {:?}, {:?}", CALL_COUNT_1, CALL_COUNT_2, CALL_COUNT_3, CALL_COUNT_4, CALL_COUNT_5);
     Ok(())
