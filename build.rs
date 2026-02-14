@@ -11,9 +11,10 @@ fn main() {
     let mut vbf = File::create(&vocab_binary).unwrap();
     let mut vof = File::create(&vocab_offsets).unwrap();
 
+    let vocab_file_path = "./nivs2_2.txt";
 
     let mut vocab_content =
-        fs::read_to_string("./new_sorted_vocab.txt").expect("where is it?");
+        fs::read_to_string(vocab_file_path).expect("where is it?");
     let mut indices: Vec<u32> = std::iter::once(0)
         .chain(vocab_content.match_indices('\n').map(|(i, _)| i as u32))
         .collect();
@@ -53,6 +54,7 @@ fn main() {
         builder.insert(word, id).unwrap();
     }
     builder.finish().unwrap();
-    
+
+    println!("cargo:rerun-if-changed={}", vocab_file_path);
     println!("cargo:rerun-if-changed=build.rs");
 }

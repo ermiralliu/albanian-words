@@ -1,7 +1,5 @@
 #![feature(portable_simd)]
-use std::{ simd::{
-    Simd,
-}};
+use std::simd::Simd;
 
 const SIMD_BYTESIZE: usize = 32;
 
@@ -16,21 +14,15 @@ type SimdHere = Simd<u8, SIMD_BYTESIZE>;
 // pub static CALL_COUNT_4: AtomicU64 = AtomicU64::new(0);
 // pub static CALL_COUNT_5: AtomicU64 = AtomicU64::new(0);
 
-pub mod alb_parser;
+// pub mod alb_parser;
+pub mod alb_parser_imprv;
 pub mod bitset;
 pub mod file_readers;
 pub mod properties;
 pub mod stop_words;
-pub mod alb_parser_imprv;
 
-use std::{
-    sync::Mutex,
-    thread,
-    time::Instant,
-    vec,
-};
+use std::{sync::Mutex, thread, time::Instant, vec};
 
-use alb_parser::AlbanianParser;
 use file_readers::seq_read;
 use fst::raw::Fst;
 use properties::Properties;
@@ -40,8 +32,7 @@ use crate::bitset::process_streaming_new;
 // use stop_words::STOP_WORDS;
 
 const DEFAULT_VEC_CAPACITY: usize = 256 * 1024;
-pub const FST_DATA: &'static [u8] = 
-    include_bytes!(concat!(env!("CARGO_MANIFEST_DIR"), "/data/", "dictionary.bin"));
+pub const FST_DATA: &'static [u8] = include_bytes!(concat!(env!("CARGO_MANIFEST_DIR"), "/data/", "dictionary.bin"));
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     // println!("Hello, world!");
@@ -64,7 +55,6 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     };
     println!("Config information: {:#?}", config);
 
-
     let start = Instant::now();
 
     let sr = seq_read::SequentialFileReader::try_new(&config.article_file, config.article_separator)?;
@@ -77,7 +67,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let shared_reader = Mutex::new(sr);
     // 'set' and 'parser' can just be regular references
     let core_count = num_cpus::get_physical();
-    // let core_count = 1; 
+    // let core_count = 1;
 
     let fst = Fst::new(FST_DATA).expect("The vocabulary has not been built successfully");
     let final_tokens: Vec<Vec<u16>> = thread::scope(|s| {
@@ -94,6 +84,8 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                 let mut thread_results = Vec::with_capacity(128);
                 let local_fst_ref = scoped_fst;
 
+                let mut stack = Vec::new();
+
                 loop {
                     local_buf.clear();
                     // Lock the reader just to fill the buffer
@@ -105,19 +97,31 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                     }
 
                     let mut article_tokens = Vec::with_capacity(256);
-                    process_streaming_new(&mut local_buf, &mut|word| {
-                        if /* stop_words.contains(word) || */ word[0].is_ascii_digit() || word.len() < 3 || word.len() >= 32 {
+                    process_streaming_new(&mut local_buf, &mut |word| {
+                        if
+                        /* stop_words.contains(word) || */
+                        word.len() < 2 || word.len() >= 32 {
                             return;
+                        }
+                        if word[0].is_ascii_digit() {
+                            article_tokens.push(1);
+                            return;
+                        }
+                        // let id = local_parser.single_verb_to_base_new(word);
+                        let id = alb_parser_imprv::single_verb_to_base_ultra(local_fst_ref, word, &mut stack);
+                        if let Some(id_num) = id {
+                            article_tokens.push(id_num + 2); // 0 is `not found` and 1 is number for now -> this should be documented more clearly 
+                        } else {
+                            article_tokens.push(0);
                         }
                         #[cfg(debug_assertions)]
                         {
-                            let printable_word = unsafe {std::str::from_utf8_unchecked(word)};
-                            println!("Word: {}", printable_word);
-                        }
-                        // let id = local_parser.single_verb_to_base_new(word);
-                        let id = alb_parser_imprv::single_verb_to_base_new(local_fst_ref, word);
-                        if let Some(id_num) = id {
-                            article_tokens.push(id_num);
+                            let printable_word = unsafe { std::str::from_utf8_unchecked(word) };
+                            let Some(id) = id else { return };
+                            let Some(val) = local_fst_ref.get_key(id as u64 - 1) else { return };
+                            let value = std::str::from_utf8(val.as_slice()).unwrap();
+
+                            println!("Word: {}, Tokenization: {}", printable_word, value);
                         }
                     });
 
@@ -135,10 +139,21 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     });
 
     let end = Instant::now();
-    let final_val = &final_tokens[final_tokens.len()-1];
+    let final_val = &final_tokens[final_tokens.len() - 1];
     println!("{:?}", final_val);
-    for el in final_val.iter().map(|x| fst.get_key(*x as u64)) {
-        if let Some(val) = el { print!("{:?},", std::str::from_utf8(val.as_slice()).unwrap());}
+    for el in final_val.iter().map(|x| {
+        if *x  == 0 {
+            return Some(Vec::from(b"Not found"));
+        } else if *x == 1 {
+            return Some(Vec::from(b"Number"));
+        }
+        return fst.get_key(*x as u64 -2 )
+
+    }
+        ) {
+        if let Some(val) = el {
+            print!("{:?},", std::str::from_utf8(val.as_slice()).unwrap());
+        }
     }
     println!("Time passed: {:?}", (end - start));
     // println!("{:?}, {:?}, {:?}, {:?}, {:?}", CALL_COUNT_1, CALL_COUNT_2, CALL_COUNT_3, CALL_COUNT_4, CALL_COUNT_5);
@@ -185,7 +200,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 //
 //
 // // #[inline(always)]
-// fn process_streaming<F>(slic: &mut [u8], process_word: &mut F) where 
+// fn process_streaming<F>(slic: &mut [u8], process_word: &mut F) where
 //     F: FnMut(&[u8]){
 //     let mut word_start = Option::None;
 //
@@ -222,7 +237,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 //     slic: &[u8],
 //     word_start: &mut Option<usize>,
 //     process_word: &mut F
-// ) where 
+// ) where
 //     F: FnMut(&[u8]){
 //     const MASK_NEG_BITS: u64 = (1 << SIMD_BYTESIZE) - 1;
 //     let mut neg_mask = (!mask) & MASK_NEG_BITS;
