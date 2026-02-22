@@ -6,6 +6,8 @@ pub struct Properties {
     pub article_separator: u8,
     pub category_list_boundary: u8,
     pub category_entry_separator: u8,
+    pub category_file_out: String,
+    pub articles_file_out: String,
 }
 impl fmt::Debug for Properties {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
@@ -24,6 +26,8 @@ impl fmt::Debug for Properties {
             .field("article_separator", &format_byte(self.article_separator))
             .field("category_list_boundary", &format_byte(self.category_list_boundary))
             .field("category_entry_separator", &format_byte(self.category_entry_separator))
+            .field("article_out", &self.articles_file_out)
+            .field("categories_file_out", &self.category_file_out)
             .finish()
     }
 }
@@ -89,6 +93,20 @@ impl Properties {
                         prop_builder.category_entry_separator(val);
                     }
                 }
+                "category_file_out" => {
+                    let value = value.trim_matches(&['\'', '"']);
+                    if value != "" {
+                        prop_builder.category_file_out(value)
+                    }
+                    
+                }
+                "articles_file_out" => {
+                    let value = value.trim_matches(&['\'', '"']);
+                    if value != "" {
+                        prop_builder.articles_file_out(value)
+                    }
+
+                }
                 _ => {}
             }
         }
@@ -116,6 +134,8 @@ pub struct PropertiesBuilder {
     article_separator: Option<u8>,
     category_list_boundary: Option<u8>,
     category_entry_separator: Option<u8>,
+    category_file_out: Option<String>,
+    articles_file_out: Option<String>,
 }
 
 #[derive(Debug)]
@@ -149,6 +169,13 @@ impl PropertiesBuilder {
         self.category_entry_separator = Some(sep);
     }
 
+    pub fn category_file_out(&mut self, file: &str){
+        self.category_file_out = Some(file.to_string());
+    } 
+    pub fn articles_file_out(&mut self, file: &str){
+        self.articles_file_out = Some(file.to_string());
+    }
+
     pub fn build(self) -> Result<Properties, ConfigError> {
         let mut missing = Vec::new();
 
@@ -157,6 +184,12 @@ impl PropertiesBuilder {
         }
         if self.category_file.is_none() {
             missing.push("category_file");
+        }
+        if self.category_file_out.is_none() {
+            missing.push("category_file_out");
+        }
+        if self.articles_file_out.is_none() {
+            missing.push("articles_file_out");
         }
 
         if !missing.is_empty() {
@@ -169,6 +202,8 @@ impl PropertiesBuilder {
             article_separator: self.article_separator.unwrap_or(0x1E), // Default value
             category_list_boundary: self.category_list_boundary.unwrap_or(b','),
             category_entry_separator: self.category_entry_separator.unwrap_or(b'\n'),
+            category_file_out: self.category_file_out.unwrap_or_default(),
+            articles_file_out: self.articles_file_out.unwrap_or_default(),
         })
     }
 }

@@ -17,3 +17,5 @@ config.ini
 s25flags.txt
 
 /data/*
+
+check_categories.txt

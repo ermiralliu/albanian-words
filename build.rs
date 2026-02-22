@@ -11,7 +11,7 @@ fn main() {
     let mut vbf = File::create(&vocab_binary).unwrap();
     let mut vof = File::create(&vocab_offsets).unwrap();
 
-    let vocab_file_path = "./nivs2_2.txt";
+    let vocab_file_path = "./nivs3.txt";
 
     let mut vocab_content =
         fs::read_to_string(vocab_file_path).expect("where is it?");

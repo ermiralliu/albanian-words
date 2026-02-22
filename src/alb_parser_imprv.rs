@@ -74,7 +74,11 @@ fn find_longest_match_with_rules(
                 None => last_found = Some((final_val, state.input_idx)),
                 Some((_, best_len)) => {
                     // We typically prioritize the longest match input-wise
-                    if state.input_idx > best_len {
+                    // if state.input_idx > best_len {
+                    //     last_found = Some((final_val, state.input_idx));
+                    // }
+                    let size_difference = (state.input_idx as isize) - (best_len as isize);
+                    if size_difference >= 0 && size_difference < 4 { // if there's a large difference in size, we just return nothing
                         last_found = Some((final_val, state.input_idx));
                     }
                 }
@@ -112,7 +116,17 @@ fn find_longest_match_with_rules(
                 });
             }
         }
-
+        if current_byte == b'q' {
+            // Check if the current FST node actually has a transition for 'o'
+            if let Some(idx) = node.find_input(b'k') {
+                let trans = node.transition(idx);
+                stack.push(SearchState {
+                    node_addr: trans.addr,
+                    input_idx: state.input_idx + 1, // Consume 'u' from input
+                    output: state.output.cat(trans.out),
+                });
+            }
+        }
         // --- RULE 2: Swap `u` -> `o` ---
         // If input is 'u', we allow the FST to traverse 'o'
         if current_byte == b'u' {

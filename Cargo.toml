@@ -8,6 +8,7 @@ num_cpus = "1.17.0"
 rustc-hash = "2.1.1"
 fst = { version = "0.4.7", features = ["levenshtein"] }
 rkyv = { version = "0.8.15", features = ["bytecheck"] }
+itertools = "0.14.0"
 
 [build-dependencies]
 fst = "0.4.7"

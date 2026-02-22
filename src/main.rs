@@ -20,6 +20,7 @@ pub mod alb_parser_imprv;
 pub mod bitset;
 pub mod categories;
 pub mod file_readers;
+pub mod map_category;
 pub mod properties;
 pub mod stop_words;
 
@@ -27,6 +28,7 @@ use std::{fs::File, sync::Mutex, thread, time::Instant, vec};
 
 use file_readers::seq_read;
 use fst::raw::Fst;
+use itertools::Itertools;
 use properties::Properties;
 use std::env;
 
@@ -62,15 +64,14 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     // let reg = u64x4::from_array(ARR);
 
     // These live on the stack of main
-    let shared_reader = Mutex::new(sr);
-    let shared_reader_categories = Mutex::new(sr_categories);
+    let shared_reader = Mutex::new((sr, sr_categories));
+    // let shared_reader_categories = Mutex::new(sr_categories);
     // 'set' and 'parser' can just be regular references
     let core_count = num_cpus::get_physical();
     // let core_count = 1;
 
     let fst = Fst::new(FST_DATA).expect("The vocabulary has not been built successfully");
-    let fst_categories =
-        Fst::new(FST_CATEGORIES).expect("Categories State Machine hasn't been built successfully");
+    let fst_categories = Fst::new(FST_CATEGORIES).expect("Categories State Machine hasn't been built successfully");
     let final_tokens: (Vec<Vec<u16>>, Vec<Vec<u16>>) = thread::scope(|s| {
         let mut handles = vec![];
         let scoped_fst = &fst;
@@ -79,7 +80,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         for _ in 0..core_count {
             // We borrow from the outer scope
             let r = &shared_reader;
-            let r_categories = &shared_reader_categories;
+            // let r_categories = &shared_reader_categories;
             // let stop_words = &set;
 
             let h = s.spawn(move || {
@@ -94,10 +95,12 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
                 loop {
                     local_buf.clear();
+                    local_category_buf.clear();
                     // Lock the reader just to fill the buffer
                     {
                         let mut reader = r.lock().unwrap();
-                        if !reader.read_into(&mut local_buf) {
+
+                        if !reader.0.read_into(&mut local_buf) || !reader.1.read_into(&mut local_category_buf) {
                             break;
                         }
                     }
@@ -123,36 +126,59 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                         #[cfg(debug_assertions)]
                         {
                             let printable_word = unsafe { std::str::from_utf8_unchecked(word) };
-                            let Some(id) = id else { return };
-                            let Some(val) = local_fst_ref.get_key(id as u64 - 1) else { return };
+                            let Some(id) = id else {
+                                println!("Word without tokenization: {}", printable_word);
+                                return;
+                            };
+                            let Some(val) = local_fst_ref.get_key(id as u64) else { return };
                             let value = std::str::from_utf8(val.as_slice()).unwrap();
-
-                            println!("Word: {}, Tokenization: {}", printable_word, value);
+                            if value.len().abs_diff(printable_word.len()) > 3 {
+                                println!("Word: {}, Tokenization: {}", printable_word, value);
+                            }
                         }
                     });
 
-                    local_category_buf.clear();
-                    {
-                        let mut reader = r_categories.lock().unwrap();
-                        if !reader.read_into(&mut local_category_buf) {
-                            break;
-                        }
-                    }
-
-                    if !article_tokens.is_empty() {
-                        thread_results.push(article_tokens);
-                    } else {
+                    if article_tokens.is_empty() {
                         continue;
                     }
+
+                    let categories_result: Vec<u16> = local_category_buf
+                        .as_mut_slice()
+                        .split(|x| *x == config.category_entry_separator)
+                        .map(|cate| {
+                            let str_cause_this_shit_is_annyoing = unsafe { std::str::from_utf8_unchecked(cate) };
+                            let cat_trimmed =
+                                str_cause_this_shit_is_annyoing.trim_matches(|x: char| !x.is_alphanumeric());
+                            if let Some(bad_category_id) =
+                                get_category_id(scoped_fst_categories, cat_trimmed.as_bytes(), &mut category_stack)
+                            {
+                                map_category::map_category_id(bad_category_id)
+                            } else {
+                                0
+                            }
+                        })
+                        .unique()
+                        .collect();
                     // article_categories
-                    thread_category_results.push(
-                        local_category_buf
-                            .as_slice()
-                            .split(|x| *x == config.category_entry_separator)
-                            .map(|cate| get_category_id(scoped_fst_categories, cate, &mut category_stack))
+                    #[cfg(debug_assertions)]
+                    {
+                        let cat_str = unsafe { std::str::from_utf8_unchecked(&local_category_buf) };
+                        let results: Vec<Vec<u8>> = categories_result
+                            .iter()
+                            .map(|x| scoped_fst_categories.get_key(*x as u64))
                             .flatten()
-                            .collect(),
-                    );
+                            .collect();
+                        let res_str: Vec<&str> = results
+                            .iter()
+                            .map(|x| unsafe { std::str::from_utf8_unchecked(x) })
+                            .collect();
+                        println!("Initial categories: {}", cat_str);
+                        println!("Categories result: {:?}, as arr: {:?}", res_str, categories_result);
+                    }
+                    if categories_result.len() > 0 {
+                        thread_category_results.push(categories_result);
+                        thread_results.push(article_tokens);
+                    }
                     // for cat in local_category_buf.as_slice().split(|x| *x == config.category_entry_separator) {
                     //     if let Some(cate) = get_id_fuzzy(scoped_fst_categories, cat){
                     //        thread_category_results.push(cate);
@@ -189,9 +215,9 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     let end = Instant::now();
     let final_val = &final_tokens.0[final_tokens.0.len() - 1];
-    let final_cat = &final_tokens.1[final_tokens.1.len() -1 ];
+    let final_cat = &final_tokens.1[final_tokens.1.len() - 1];
     println!("{:?}", final_val);
-    for el in final_val.iter().map(|x,| {
+    for el in final_val.iter().map(|x| {
         if *x == 0 {
             return Some(Vec::from(b"Not found"));
         } else if *x == 1 {
@@ -203,7 +229,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             print!("{:?},", std::str::from_utf8(val.as_slice()).unwrap());
         }
     }
-    for el in final_cat.iter().map(|x,| {
+    for el in final_cat.iter().map(|x| {
         return fst_categories.get_key(*x as u64);
     }) {
         if let Some(val) = el {
@@ -212,8 +238,8 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     }
     println!("Time passed: {:?}", (end - start));
     // println!("{:?}, {:?}, {:?}, {:?}, {:?}", CALL_COUNT_1, CALL_COUNT_2, CALL_COUNT_3, CALL_COUNT_4, CALL_COUNT_5);
-    save_to_file(final_tokens.0, "out/albanian_test.rkyv")?;
-    save_to_file(final_tokens.1, "out/albanian_test_categories.rkyv")?;
+    save_to_file(final_tokens.0, &config.articles_file_out)?; // "out/albanian_test.rkyv"
+    save_to_file(final_tokens.1, &config.category_file_out)?; // "out/albanian_test_categories.rkyv"
     Ok(())
 }
 
