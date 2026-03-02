@@ -73,6 +73,7 @@ adhurues
 adhurueshm
 adjutant
 adjutantur
+administrat
 administrativ
 administrativisht
 administrator
@@ -490,6 +491,7 @@ ambasad
 ambasador
 ambicie
 ambicioz
+ambient
 ambiento
 ambientohe
 ambulanc
@@ -551,6 +553,8 @@ anakronik
 anakronizm
 analfabet
 analfabetizm
+analist
+analiz
 analizim
 analizo
 analogjik
@@ -620,6 +624,7 @@ angari
 angazhim
 angazho
 angazhohe
+angela
 angërduf
 angërdufem
 angërr
@@ -786,6 +791,8 @@ apëlo
 apelohet
 apendicit
 aplik
+aplikacion
+apliko
 aplladhe
 apo
 apogje
@@ -844,6 +851,7 @@ arbitro
 arbitror
 arbr
 arçare
+ardh
 ardhang
 ardhangem
 ardhangësi
@@ -1225,6 +1233,7 @@ asnjëher
 asnjeri
 asnjëri
 asobote
+asoc
 asociacion
 asodore
 asohere
@@ -1690,6 +1699,7 @@ ballin
 ballist
 ballje
 ballk
+ballkan
 ballkanas
 ballkanik
 ballkanologji
@@ -2384,6 +2394,7 @@ beribat
 beriha
 bërje
 bërlct
+berlin
 bërllok
 bërlut
 bërlyket
@@ -4869,6 +4880,7 @@ cork
 çorodits
 çoroditur
 corona
+coronavirus
 çosa
 çot
 covid
@@ -5669,6 +5681,7 @@ dëshpërues
 dëshpërueshm
 dështak
 dështijes
+dështim
 dështimore
 dështo
 dështuar
@@ -5937,6 +5950,7 @@ diametralisht
 diapazon
 diapozitiv
 diarre
+diaspor
 diatez
 dibl
 dibran
@@ -6243,6 +6257,7 @@ dobësim
 dobëso
 dobësohe
 dobësuar
+dobi
 dobiç
 dobiprurs
 dobishm
@@ -6997,6 +7012,7 @@ edukuese
 efekt
 efektiv
 efektshm
+efektshmri
 efendi
 efsh
 efsho
@@ -7283,6 +7299,7 @@ enjte
 enkas
 enkeleas
 ent
+entitet
 entuziast
 entuziazm
 entuziazmo
@@ -7326,6 +7343,7 @@ er
 eracak
 erak
 erashk
+erdh
 erëdhënes
 erëkendshm
 erëkeq
@@ -7446,6 +7464,8 @@ euforik
 eukalipt
 eunck
 euro
+euroazi
+euroaziatik
 europ
 evari
 evarishm
@@ -9652,6 +9672,8 @@ gjithmon
 gjithmonshm
 gjithnduer
 gjithnj
+gjithpërfshi
+gjithpërfshirs
 gjithqysh
 gjithsaher
 gjithsecili
@@ -10335,6 +10357,7 @@ grup
 grupash
 grupazh
 grupim
+grupmosh
 grupo
 grupohe
 grupor
@@ -11290,6 +11313,7 @@ holluese
 hollush
 homazh
 homogjen
+homolog
 homonim
 homonimik
 homontmi
@@ -11652,6 +11676,9 @@ indian
 indiferenc
 indiferent
 indigjen
+indiko
+indikim
+indikacion
 indinjat
 indinjo
 indinjohe
@@ -11694,6 +11721,7 @@ informator
 informim
 informo
 informuar
+infrastruktur
 ingranazh
 iniciativ
 iniciator
@@ -11948,6 +11976,7 @@ jelebardh
 jelegjat
 jelek
 jelekuq
+jem
 jemenas
 jen
 jenicer
@@ -13355,6 +13384,7 @@ ketr
 këtu
 këtupari
 kez
+kg
 kgnstatohet
 kiamet
 kibernetik
@@ -13455,6 +13485,7 @@ klient
 klik
 klim
 klimaterik
+klimatik
 klin
 klinik
 kliring
@@ -13810,6 +13841,7 @@ kompas
 kompensat
 kompetenc
 kompetent
+kompeticion
 kompilim
 kompilo
 kompleks
@@ -13862,6 +13894,8 @@ konduktore
 kone
 konfederat
 konferenc
+konfidenc
+konfidencial
 konfirmim
 konfirmo
 konfiskim
@@ -14274,6 +14308,7 @@ krep
 krepato
 krepatohe
 krepo
+krer
 kres
 kreshk
 kreshkt
@@ -14309,6 +14344,7 @@ krifëbardh
 krifëgjat
 krifsh
 krijes
+krijim
 krijimtari
 krijo
 krijohet
@@ -15502,6 +15538,7 @@ legjendar
 legjion
 legjionar
 legjislacion
+legjitim
 leh
 lehaqen
 lehe
@@ -15905,6 +15942,7 @@ librushk
 lic
 lice
 liceist
+lider
 lidh
 lidhak
 lidhëse
@@ -16092,6 +16130,7 @@ livadhisht
 livadhisje
 livadhor
 livand
+liverpool
 livrim
 livro
 livrohet
@@ -16870,6 +16909,7 @@ margaritar
 margjënor
 marifet
 marifetçi
+marihuan
 marin
 marinar
 marionet
@@ -16893,7 +16933,7 @@ marrash
 marre
 marrëdhënie
 marrëse
-marrëveshje
+marrëveshj
 marrëzisht
 marri
 marrisht
@@ -17041,8 +17081,8 @@ mazore
 mazurk
 mazut
 mb
+mba
 mbahe
-mbaixo
 mbaj
 mbajtëse
 mbajtje
@@ -18656,6 +18696,7 @@ muskul
 muskulatur
 muskulor
 muslluk
+mustaf
 mustak
 mustakoç
 mustaqe
@@ -20556,6 +20597,7 @@ paarsimuar
 paarsye
 paasfaltuar
 paatdhe
+paautoriz
 pabab
 pabaft
 pabancarr
@@ -20692,6 +20734,7 @@ paepur
 paer
 paër
 paerrësueshm
+paevitueshm
 pafaj
 pafajësi
 pafajshm
@@ -21439,7 +21482,7 @@ parapleqëri
 paraprak
 paraprakisht
 parapres
-paraprij
+parapri
 paraprijs
 paraprit
 parapritje
@@ -21520,6 +21563,7 @@ pareshtur
 parësi
 parësor
 parëti
+parevokueshm
 parëzim
 parëzo
 parëzohe
@@ -21533,6 +21577,7 @@ parim
 parimësi
 parimisht
 parimor
+paris
 paritet
 paritm
 park
@@ -21572,6 +21617,7 @@ partizan
 partizance
 partizane
 partner
+partneritet
 parttzan
 paruk
 parull
@@ -22042,6 +22088,7 @@ penjz
 peno
 penqo
 pension
+pensionist
 pentagram
 penxhere
 pepeq
@@ -22067,6 +22114,7 @@ perballijeshm
 përballim
 përballo
 përballohe
+përballueshm
 përbalt
 përbaltem
 përbalts
@@ -22268,6 +22316,7 @@ përfill
 përfillje
 përfitim
 përfitimshm
+përfito
 përfitohet
 përfitues
 përflak
@@ -22286,8 +22335,8 @@ përforco
 përforcohe
 përforcuar
 përforcues
+përfshi
 përfshihe
-përfshij
 përfshirje
 përftes
 përftim
@@ -23313,6 +23362,7 @@ pilul
 pin
 pinar
 pinc
+ping
 pingërim
 pingëron
 pingl
@@ -23776,6 +23826,7 @@ pompo
 pompoz
 pompozitet
 ponç
+pong
 ponic
 pont
 pop
@@ -23937,6 +23988,7 @@ pozitiv
 pozitivishtt
 pozitivist
 pozo
+pra
 prafullim
 prafullo
 prag
@@ -24098,6 +24150,7 @@ presh
 presht
 preshton
 presidencial
+presidenc
 president
 presidente
 presidiçm
@@ -24152,6 +24205,7 @@ prind
 prindëror
 prinxh
 prior
+prioritet
 pripal
 prir
 prirem
@@ -25336,6 +25390,7 @@ ranisht
 ranor
 raport
 raportim
+raporto
 raportor
 raportues
 rapsod
@@ -25654,7 +25709,7 @@ rezolut
 rezonator
 rezultante
 rezultat
-rezulton
+rezulto
 ri
 riafrim
 riafro
@@ -25708,7 +25763,9 @@ rikopjim
 rikrijim
 rikrijo
 rikrijohet
+rikthe
 rikthehe
+rikthim
 rikujtim
 rikujto
 rikujtohe
@@ -26062,6 +26119,7 @@ rrëgjukull
 rrëgjyl
 rrëgjyr
 rregull
+rregullator
 rregulli
 rregullim
 rregullisht
@@ -26926,6 +26984,8 @@ setr
 sevap
 sevda
 sevdalli
+sex
+sezon
 sfer
 sferik
 sfid
@@ -27017,6 +27077,7 @@ shamtij
 shamtin
 shandan
 shaneshin
+shans
 shantazh
 shap
 shapakot
@@ -27238,6 +27299,7 @@ sherbeto
 shërbëtor
 shërbëtore
 shërbim
+shërbye
 shërbyes
 shërbyese
 shërcar
@@ -27743,6 +27805,7 @@ shkrirs
 shkrishm
 shkrishmëri
 shkritore
+shkro
 shkrofëtij
 shkrofëtim
 shkrohe
@@ -29703,6 +29766,7 @@ squfurosje
 squfurt
 squk
 sqyre
+stabil
 stabiliment
 stabilizim
 stabilizo
@@ -29711,6 +29775,7 @@ stabujtet
 stacion
 stad
 stadium
+staf
 stafet
 stafidhe
 stafilokok
@@ -29737,6 +29802,7 @@ start
 statik
 statistik
 statistikor
+status
 statut
 stav
 staxhionim
@@ -30584,6 +30650,7 @@ tërmëkemm
 tërmekt
 tërmet
 termëzat
+terminal
 terminologji
 terminologjik
 termite
@@ -31254,10 +31321,12 @@ trampolin
 tramvaj
 trand
 trandem
+transfer
 transferim
 transfero
 transferohe
 transformator
+transformim
 transhe
 transistor
 transit
@@ -31266,6 +31335,7 @@ transkripto
 transmet
 transmeto
 transmision
+transplant
 transport
 transportim
 transporto
@@ -31790,6 +31860,7 @@ udhisht
 udhore
 udhz
 uells
+uefa
 ufm
 ugandas
 ugar
@@ -31926,6 +31997,7 @@ unifkohet
 uniform
 uniftko
 unik
+united
 unitet
 univers
 universal
@@ -33017,6 +33089,7 @@ violinist
 violiniste
 violonçel
 violonçelist
+vip
 vir
 viran
 viranohet
@@ -33667,7 +33740,6 @@ yst
 yt
 yvell
 yzengji
-z
 zabari
 zabca
 zabe
@@ -34038,9 +34110,11 @@ zëshm
 zëshmim
 zëshmohet
 zesko
+zëvendësambasador
 zëvendëse
 zëvendësi
 zëvendësim
+zevendëskryeministr
 zëvendëskryetar
 zevendëskryetare
 zëvendësministr

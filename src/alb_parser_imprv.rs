@@ -67,19 +67,28 @@ fn find_longest_match_with_rules(
 
         // 1. Check if the current node is a Final State (Match Found)
         if node.is_final() {
-            let final_val = state.output.cat(node.final_output()).value() as usize;
+            // let final_val = state.output.cat(node.final_output()).value() as usize;
+            //
+            // // Logic to determine if this match is "better"
+            // match last_found {
+            //     None => last_found = Some((final_val, state.input_idx)),
+            //     Some((_, best_len)) => {
+            //         if state.input_idx > best_len {
+            //             last_found = Some((final_val, state.input_idx));
+            //         }
+            //     }
+            // }
+            if input.len() - state.input_idx <= 4 {
+                let final_val = state.output.cat(node.final_output()).value() as usize;
 
-            // Logic to determine if this match is "better"
-            match last_found {
-                None => last_found = Some((final_val, state.input_idx)),
-                Some((_, best_len)) => {
-                    // We typically prioritize the longest match input-wise
-                    // if state.input_idx > best_len {
-                    //     last_found = Some((final_val, state.input_idx));
-                    // }
-                    let size_difference = (state.input_idx as isize) - (best_len as isize);
-                    if size_difference >= 0 && size_difference < 4 { // if there's a large difference in size, we just return nothing
-                        last_found = Some((final_val, state.input_idx));
+                // Logic to determine if this match is "better"
+                match last_found {
+                    None => last_found = Some((final_val, state.input_idx)),
+                    Some((_, best_len)) => {
+                        // Prioritize the longest match input-wise
+                        if state.input_idx > best_len {
+                            last_found = Some((final_val, state.input_idx));
+                        }
                     }
                 }
             }
@@ -130,7 +139,7 @@ fn find_longest_match_with_rules(
         // --- RULE 2: Swap `u` -> `o` ---
         // If input is 'u', we allow the FST to traverse 'o'
         if current_byte == b'u' {
-            // Check if the current FST node actually has a transition for 'o'
+            // Check if the current FST node has a transition for 'o'
             if let Some(idx) = node.find_input(b'o') {
                 let trans = node.transition(idx);
                 stack.push(SearchState {

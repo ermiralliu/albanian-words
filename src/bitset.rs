@@ -1,6 +1,7 @@
 use std::{
     simd::cmp::{SimdPartialEq, SimdPartialOrd},
 };
+use std::simd::prelude::*;
 
 use crate::{SIMD_BYTESIZE, SimdHere};
 
@@ -19,20 +20,17 @@ fn process_chunk(full_slic: &mut [u8], mut prev_ends_with_c3: u64) -> (u64, u64)
         let start = i * SIMD_BYTESIZE;
         let slic = &mut full_slic[start..start + SIMD_BYTESIZE];
         
-        // Manual hint for the compiler to elide bounds checks
-        if slic.len() != SIMD_BYTESIZE { unsafe { std::hint::unreachable_unchecked(); } }
+        if slic.len() != SIMD_BYTESIZE { unsafe { std::hint::unreachable_unchecked(); } } // to avoid bounds check
+                                                                                          
 
         let chunk = SimdHere::from_slice(slic);
-        
-        // 1. Identify 0xC3
+        // 1. Identify 0xC3 // e with diaeresis and c with cedilla
         let is_c3 = chunk.simd_eq(SimdHere::splat(0xC3));
         let c3_mask = is_c3.to_bitmask() as u64;
         let is_last_c3 = (c3_mask >> SIMD_BYTESIZE_SHIFT) & 1 != 0;
-
-        // 2. Transform (Lowercase hack)
+        // 2. Lowercase 
         let lower_hack = chunk | SimdHere::splat(0x20);
         let transformed = is_c3.select(chunk, lower_hack);
-
         // 3. Validation
         let is_digit = transformed.simd_ge(SimdHere::splat(b'0')) & transformed.simd_le(SimdHere::splat(b'9'));
         let is_alpha = transformed.simd_ge(SimdHere::splat(b'a')) & transformed.simd_le(SimdHere::splat(b'z'));
@@ -47,10 +45,8 @@ fn process_chunk(full_slic: &mut [u8], mut prev_ends_with_c3: u64) -> (u64, u64)
 
         // Place the local bits into the correct position in the 64-bit mask
         combined_mask |= local_valid << (i * SIMD_BYTESIZE);
-
         // 5. Write back
         transformed.copy_to_slice(slic);
-
         // Carry the last lane's C3 status to the next SIMD chunk
         prev_ends_with_c3 = is_last_c3 as u64;
     }
@@ -88,12 +84,9 @@ where
 
 // #[inline(always)]
 fn read_word_from_bitset_new<F>(
-    mask: u64,
-    chunk_start: u32,
-    last_was_valid: bool,
-    slic: &[u8], // we can pass only the start pointer here.
-    word_start: &mut Option<u32>,
-    process_word: &mut F,
+    mask: u64, chunk_start: u32,
+    last_was_valid: bool, slic: &[u8], // we can pass only the start pointer here.
+    word_start: &mut Option<u32>, process_word: &mut F,
 ) where
     F: FnMut(&[u8]),
 {
@@ -103,7 +96,7 @@ fn read_word_from_bitset_new<F>(
     if let Some(previous_start) = word_start {
         let previous_start = *previous_start as usize;
         let end = ends.trailing_zeros();
-        let end = if end as usize == 64 { // I should not hardcode 64 but we'll see
+        let end = if end as usize == 64 {
             64
         } else {
             end as usize

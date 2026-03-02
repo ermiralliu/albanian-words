@@ -1,4 +1,5 @@
 #![feature(portable_simd)]
+use std::fmt::Debug;
 use std::io::{BufRead, Write};
 use std::simd::Simd;
 
@@ -55,24 +56,24 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     println!("Config information: {:#?}", config);
 
     let start = Instant::now();
-
-    let sr = seq_read::SequentialFileReader::try_new(&config.article_file, config.article_separator)?;
-    let sr_categories = seq_read::SequentialFileReader::try_new(&config.category_file, config.category_list_boundary)?;
     // let mut count = 0;
     // let set: HashSet<&[u8]> = STOP_WORDS.iter().copied().map(|word| word.as_bytes()).collect();
 
     // let reg = u64x4::from_array(ARR);
 
+    // Shared variables
     // These live on the stack of main
+    let sr = seq_read::SequentialFileReader::try_new(&config.article_file, config.article_separator)?;
+    let sr_categories = seq_read::SequentialFileReader::try_new(&config.category_file, config.category_list_boundary)?;
+    // The threads will modify the inner pointer that keeps track of the position in the file, so
+    // this needs a mutex to avoid simultaneous reads/writes.
     let shared_reader = Mutex::new((sr, sr_categories));
-    // let shared_reader_categories = Mutex::new(sr_categories);
-    // 'set' and 'parser' can just be regular references
+    
     let core_count = num_cpus::get_physical();
-    // let core_count = 1;
-
     let fst = Fst::new(FST_DATA).expect("The vocabulary has not been built successfully");
     let fst_categories = Fst::new(FST_CATEGORIES).expect("Categories State Machine hasn't been built successfully");
-    let final_tokens: (Vec<Vec<u16>>, Vec<Vec<u16>>) = thread::scope(|s| {
+
+    let final_tokens: (Vec<Vec<u16>>, Vec<Vec<u8>>) = thread::scope(|s| {
         let mut handles = vec![];
         let scoped_fst = &fst;
         let scoped_fst_categories = &fst_categories;
@@ -87,7 +88,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                 let mut local_buf = Vec::with_capacity(DEFAULT_VEC_CAPACITY);
                 let mut local_category_buf = Vec::with_capacity(64);
                 let mut thread_results = Vec::with_capacity(128);
-                let mut thread_category_results: Vec<Vec<u16>> = Vec::with_capacity(8);
+                let mut thread_category_results: Vec<Vec<u8>> = Vec::with_capacity(8);
                 let local_fst_ref = scoped_fst;
 
                 let mut stack = Vec::new();
@@ -142,7 +143,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                         continue;
                     }
 
-                    let categories_result: Vec<u16> = local_category_buf
+                    let categories_result: Vec<u8> = local_category_buf
                         .as_mut_slice()
                         .split(|x| *x == config.category_entry_separator)
                         .map(|cate| {
@@ -152,7 +153,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                             if let Some(bad_category_id) =
                                 get_category_id(scoped_fst_categories, cat_trimmed.as_bytes(), &mut category_stack)
                             {
-                                map_category::map_category_id(bad_category_id)
+                                map_category::map_category_id(bad_category_id) as u8
                             } else {
                                 0
                             }
@@ -238,12 +239,13 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     }
     println!("Time passed: {:?}", (end - start));
     // println!("{:?}, {:?}, {:?}, {:?}, {:?}", CALL_COUNT_1, CALL_COUNT_2, CALL_COUNT_3, CALL_COUNT_4, CALL_COUNT_5);
-    save_to_file(final_tokens.0, &config.articles_file_out)?; // "out/albanian_test.rkyv"
-    save_to_file(final_tokens.1, &config.category_file_out)?; // "out/albanian_test_categories.rkyv"
+    save_to_file_u16(final_tokens.0, &config.articles_file_out)?; // "out/albanian_test.rkyv"
+    save_to_file_u8(final_tokens.1, &config.category_file_out)?; // "out/albanian_test_categories.rkyv"
     Ok(())
 }
 
 use rkyv::{Archive, Deserialize, Serialize};
+// 1. Define a trait
 
 #[derive(Archive, Deserialize, Serialize, Debug, PartialEq)]
 #[rkyv(
@@ -252,14 +254,26 @@ use rkyv::{Archive, Deserialize, Serialize};
     // bytecheck can be used to validate your data if you want
     derive(Debug),
 )]
-struct Data {
+struct DataU16{
     matrix: Vec<Vec<u16>>,
 }
 
-// Efficiently save to disk
-pub fn save_to_file(matrix: Vec<Vec<u16>>, path: &str) -> Result<(), Box<dyn std::error::Error>> {
+#[derive(Archive, Deserialize, Serialize, Debug, PartialEq)]
+#[rkyv(
+    // This will generate a PartialEq impl between archived and normal types
+    compare(PartialEq),
+    // bytecheck can be used to validate your data if you want
+    derive(Debug),
+)]
+struct DataU8{
+    matrix: Vec<Vec<u8>>,
+}
+
+pub fn save_to_file_u16(matrix: Vec<Vec<u16>>, path: &str) -> Result<(), Box<dyn std::error::Error>>
+{
+    
     // Serialize to bytes
-    let data = Data { matrix };
+    let data = DataU16 { matrix };
     let bytes = rkyv::to_bytes::<rkyv::rancor::Error>(&data)?;
 
     // Write to file
@@ -269,3 +283,72 @@ pub fn save_to_file(matrix: Vec<Vec<u16>>, path: &str) -> Result<(), Box<dyn std
     println!("Data written successfully!");
     Ok(())
 }
+
+pub fn save_to_file_u8(matrix: Vec<Vec<u8>>, path: &str) -> Result<(), Box<dyn std::error::Error>>
+{
+    
+    // Serialize to bytes
+    let data = DataU8 { matrix };
+    let bytes = rkyv::to_bytes::<rkyv::rancor::Error>(&data)?;
+
+    // Write to file
+    let mut file = File::create(path)?;
+    file.write_all(&bytes)?;
+
+    println!("Data written successfully!");
+    Ok(())
+}
+// use rkyv::ser::allocator::ArenaHandle;
+// use rkyv::util::AlignedVec;
+// use rkyv::rancor::Error;
+
+// pub fn save_to_file<T>(matrix: Vec<Vec<T>>, path: &str) -> Result<(), Box<dyn std::error::Error>>
+// where
+//     T: std::fmt::Debug + Archive,
+//     for<'a> T: rkyv::Serialize<rkyv::api::high::HighSerializer<AlignedVec, ArenaHandle<'a>, Error>>,
+// {
+//     let data = Data { matrix };
+//     let bytes = rkyv::to_bytes::<rkyv::rancor::Error>(&data)?;
+
+//     let mut file = File::create(path)?;
+//     file.write_all(&bytes)?;
+
+//     println!("Data written successfully!");
+//     Ok(())
+// }
+
+// Efficiently save to disk
+// #[derive(Archive, Deserialize, Serialize, Debug, PartialEq)]
+// #[rkyv(compare(PartialEq))]
+// struct Data<T: std::fmt::Debug + Archive> {
+//     matrix: Vec<Vec<T>>,
+// }
+
+// impl<T> std::fmt::Debug for ArchivedData<T>
+// where
+//     T: Archive + std::fmt::Debug,
+//     <T as Archive>::Archived: std::fmt::Debug,
+// {
+//     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+//         f.debug_struct("ArchivedData")
+//             .field("matrix", &self.matrix)
+//             .finish()
+//     }
+// }
+
+// pub fn save_to_file<T>(matrix: Vec<Vec<T>>, path: &str) -> Result<(), Box<dyn std::error::Error>>
+// where
+//     T: std::fmt::Debug + Archive,
+//     <T as Archive>::Archived: std::fmt::Debug,
+//     for<'a> T: rkyv::Serialize<rkyv::api::high::HighSerializer<rkyv::util::AlignedVec, rkyv::ser::allocator::ArenaHandle<'a>, rkyv::rancor::Error>>,
+//     for<'a> Vec<T>: rkyv::Serialize<rkyv::api::high::HighSerializer<rkyv::util::AlignedVec, rkyv::ser::allocator::ArenaHandle<'a>, rkyv::rancor::Error>>,
+// {
+//     let data = Data { matrix };
+//     let bytes = rkyv::to_bytes::<rkyv::rancor::Error>(&data)?;
+
+//     let mut file = File::create(path)?;
+//     file.write_all(&bytes)?;
+
+//     println!("Data written successfully!");
+//     Ok(())
+// }

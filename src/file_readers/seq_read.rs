@@ -17,7 +17,6 @@ impl SequentialFileReader {
         Ok(SequentialFileReader { reader, delimiter })
     }
 
-    // These are parts that I'm adding so I can make the logic more reusable
     pub fn read_into(&mut self, buf: &mut Vec<u8>) -> bool {
         let Ok(bytes_read) = self.reader.read_until(self.delimiter, buf) else { return false };
 
@@ -25,7 +24,7 @@ impl SequentialFileReader {
         if bytes_read == 0 {
             return false;
         }
-        // buf.truncate(buf.len()-1);
+        
         let len = buf.len();
         let remainder = len % LANESIZE;
 
